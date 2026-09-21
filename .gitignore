@@ -15,3 +15,9 @@ venv/
 node_modules/
 dist/
 build/
+
+# CDK
+cdk.out/
+
+# Env
+.env
