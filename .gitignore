@@ -21,3 +21,8 @@ cdk.out/
 
 # Env
 .env
+
+# Dataset (downloaded raw data exceeds GitHub's file size limit;
+# processed/ is regenerable via dataset/preprocess_traces.py)
+dataset/raw/
+dataset/processed/
