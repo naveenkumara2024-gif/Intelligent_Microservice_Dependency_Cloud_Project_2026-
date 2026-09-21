@@ -4,6 +4,7 @@ edges.csv) into a fixed PyTorch Geometric topology reused by every synthetic
 fault-injection scenario in Stage 3.
 """
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,14 @@ from torch_geometric.data import Data
 PROCESSED_DIR = Path(__file__).parent.parent.parent / "Dataset" / "processed"
 
 RPCTYPES = ["rpc", "db", "mc", "http", "mq", "userDefined"]
+
+# Per-node dynamic features (per scenario): own delta, max delta among direct
+# downstream callees, mean delta among direct downstream callees.
+DYNAMIC_DIM_FULL = 3
+
+# Deviations span ~1e-4 (faint ripple at a barely-coupled caller) to 1.0 (a
+# full fault); log scaling keeps the faint end visible to the network.
+LOG_SCALE_K = 1000.0
 
 
 def _minmax(x: np.ndarray) -> np.ndarray:
@@ -26,8 +35,13 @@ def _minmax(x: np.ndarray) -> np.ndarray:
 class ServiceGraph:
     """Fixed topology + static features, shared across all synthetic scenarios."""
 
-    def __init__(self, nodes_path: Path = None, edges_path: Path = None, device: str = "cpu"):
+    def __init__(self, nodes_path: Path = None, edges_path: Path = None, device: str = "cpu",
+                 dynamic_features: str = "full"):
+        if dynamic_features not in ("full", "own"):
+            raise ValueError("dynamic_features must be 'full' or 'own'")
         self.device = device
+        self.dynamic_features = dynamic_features
+        self.num_dynamic = DYNAMIC_DIM_FULL if dynamic_features == "full" else 1
         nodes_path = nodes_path or PROCESSED_DIR / "nodes.csv"
         edges_path = edges_path or PROCESSED_DIR / "edges.csv"
 
@@ -80,25 +94,41 @@ class ServiceGraph:
                 continue
             self.reverse_adj.setdefault(d, set()).add(u)
 
-        # Per-node baseline latency, used to scale injected latency deltas.
-        # A node's "baseline" is the average avg_latency_ms across edges
-        # where it appears as um (the latency it experiences making calls);
-        # nodes that never call anyone fall back to the global mean.
-        um_latency = edges_df.groupby("um")["avg_latency_ms"].mean()
-        global_mean = edges_df["avg_latency_ms"].mean()
-        baseline = np.full(self.num_nodes, global_mean, dtype=np.float32)
-        for name, val in um_latency.items():
-            baseline[self.name_to_idx[name]] = val
-        self.baseline_latency = baseline
+        # Traffic coupling for fault propagation: reverse_weight[callee][caller]
+        # = fraction of the caller's (non-self-loop) outgoing call volume that
+        # goes to this callee, i.e. how strongly the caller depends on it.
+        call_counts = edges_df["call_count"].to_numpy(dtype=np.float64)
+        out_volume = np.zeros(self.num_nodes, dtype=np.float64)
+        for u, d, c in zip(um_idx.tolist(), dm_idx.tolist(), call_counts.tolist()):
+            if u != d:
+                out_volume[u] += c
+        self.reverse_weight: dict[int, dict[int, float]] = {}
+        for u, d, c in zip(um_idx.tolist(), dm_idx.tolist(), call_counts.tolist()):
+            if u != d:
+                self.reverse_weight.setdefault(d, {})[u] = c / out_volume[u]
+
+        # Non-self-loop edges used to aggregate each node's downstream deltas.
+        nonloop = um_idx != dm_idx
+        self._nb_src = torch.tensor(um_idx[nonloop], dtype=torch.long, device=device)
+        self._nb_dst = torch.tensor(dm_idx[nonloop], dtype=torch.long, device=device)
 
         # Candidate root-cause nodes: must have >=1 incoming call (someone
         # has to notice they're slow).
         self.candidate_root_indices = sorted(set(dm_idx.tolist()))
 
-    def to_data(self, dynamic_feature: torch.Tensor) -> Data:
-        """dynamic_feature: [N] tensor -> full [N, 5] node feature Data object."""
-        dynamic_feature = dynamic_feature.to(self.device)
-        x = torch.cat([self.static_features, dynamic_feature.view(-1, 1)], dim=1)
+    def to_data(self, own_delta: torch.Tensor) -> Data:
+        """own_delta: [N] per-node observed latency delta -> Data with
+        [N, 4 + num_dynamic] node features."""
+        own = own_delta.to(self.device)
+        cols = [own]
+        if self.dynamic_features == "full":
+            downstream = own[self._nb_dst]
+            for reduce in ("amax", "mean"):
+                agg = torch.zeros_like(own)
+                agg.scatter_reduce_(0, self._nb_src, downstream, reduce=reduce, include_self=False)
+                cols.append(agg)
+        dynamic = torch.log1p(torch.stack(cols, dim=1) * LOG_SCALE_K) / math.log1p(LOG_SCALE_K)
+        x = torch.cat([self.static_features, dynamic], dim=1)
         return Data(x=x, edge_index=self.edge_index, edge_attr=self.edge_attr)
 
 

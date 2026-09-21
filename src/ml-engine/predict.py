@@ -25,8 +25,8 @@ TOP_K = 10
 
 
 def load_model(graph: ServiceGraph, device: str) -> RootCauseGNN:
-    model = RootCauseGNN(node_in_dim=graph.static_features.shape[1] + 1,
-                          edge_dim=graph.edge_attr.shape[1])
+    model = RootCauseGNN(node_in_dim=graph.static_features.shape[1] + graph.num_dynamic,
+                          edge_dim=graph.edge_attr.shape[1], dynamic_dim=graph.num_dynamic)
     state_dict = torch.load(ARTIFACTS_DIR / "model.pt", map_location=device)
     model.load_state_dict(state_dict)
     model.to(device)
@@ -34,11 +34,13 @@ def load_model(graph: ServiceGraph, device: str) -> RootCauseGNN:
     return model
 
 
-def run_scenario(graph: ServiceGraph, model: RootCauseGNN, root: int, factor: float) -> None:
-    scenario = fault_injection.inject_fault(graph, root, factor)
-    affected = int((scenario.dynamic_feature > 0).sum())
-    print(f"\nInjected fault at: {graph.service_names[root]}  (factor={factor:.2f}, "
-          f"{affected} downstream-affected ancestor nodes within {fault_injection.MAX_HOPS} hops)")
+def run_scenario(graph: ServiceGraph, model: RootCauseGNN, root: int, factor: float,
+                 rng: random.Random) -> None:
+    scenario = fault_injection.inject_fault(graph, root, factor, rng)
+    doubled = int((scenario.dynamic_feature > 1.0 / (fault_injection.FACTOR_HIGH - 1.0)).sum())
+    print(f"\nInjected fault at: {graph.service_names[root]}  (factor={factor:.2f}; {doubled} nodes "
+          "are at >2x their normal latency, incl. a few unrelated distractor spikes; "
+          "every node also gets background jitter)")
 
     with torch.no_grad():
         data = graph.to_data(scenario.dynamic_feature)
@@ -133,7 +135,7 @@ def main() -> None:
         factor_input = input("Severity factor [3-10, blank for random]: ").strip()
         factor = float(factor_input) if factor_input else rng.uniform(3.0, 10.0)
 
-        run_scenario(graph, model, root, factor)
+        run_scenario(graph, model, root, factor, rng)
 
 
 if __name__ == "__main__":
