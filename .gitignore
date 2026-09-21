@@ -26,3 +26,6 @@ cdk.out/
 # processed/ is regenerable via dataset/preprocess_traces.py)
 dataset/raw/
 dataset/processed/
+
+# ML training artifacts (build output, regenerable via src/ml-engine/train.py)
+src/ml-engine/artifacts/

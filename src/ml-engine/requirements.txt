@@ -3,3 +3,4 @@ torch-geometric
 boto3
 pandas
 numpy
+scikit-learn
