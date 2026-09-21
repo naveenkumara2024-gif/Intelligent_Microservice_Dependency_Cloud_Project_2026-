@@ -1,0 +1,15 @@
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: rca-neo4j
+    ports:
+      - "7474:7474" # browser
+      - "7687:7687" # bolt
+    environment:
+      # CHANGE ME before using this anywhere beyond local prototyping.
+      NEO4J_AUTH: neo4j/changeme123
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:
