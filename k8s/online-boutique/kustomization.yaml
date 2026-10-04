@@ -1,0 +1,34 @@
+# Online Boutique v0.10.7 (vendored upstream manifest, unmodified) plus tracing
+# env vars pointing at our OTel Collector. Apply with `kubectl apply -k`.
+#
+# Only these 7 services have OpenTelemetry tracing implemented upstream
+# (kustomize/components/google-cloud-operations in v0.10.7). adservice,
+# shippingservice, cartservice, redis-cart and loadgenerator emit no spans, so
+# the live graph will have no outgoing edges from those nodes.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - kubernetes-manifests.yaml
+patches:
+  - target:
+      kind: Deployment
+      name: checkoutservice|currencyservice|emailservice|frontend|paymentservice|productcatalogservice|recommendationservice
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: ENABLE_TRACING
+          value: "1"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: COLLECTOR_SERVICE_ADDR
+          value: otel-collector.observability.svc.cluster.local:4317
+      # Each pod carries `app: <service>`; reuse it as the OTel service name.
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OTEL_SERVICE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['app']
