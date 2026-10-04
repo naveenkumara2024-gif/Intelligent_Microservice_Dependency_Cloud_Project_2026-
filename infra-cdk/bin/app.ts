@@ -16,7 +16,7 @@ const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' };
 const app = new cdk.App();
 
 const vpcStack = new VpcStack(app, 'VpcStack', { env });
-const eksStack = new EksStack(app, 'EksStack', { env });
+const eksStack = new EksStack(app, 'EksStack', { env, vpc: vpcStack.vpc });
 const mskStack = new MskStack(app, 'MskStack', { env });
 const neptuneStack = new NeptuneStack(app, 'NeptuneStack', { env });
 const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });

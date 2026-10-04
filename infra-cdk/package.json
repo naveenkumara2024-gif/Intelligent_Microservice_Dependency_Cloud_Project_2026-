@@ -10,7 +10,11 @@
     "bootstrap": "tsx scripts/bootstrap.ts",
     "deploy:vpc": "npm run preflight && cdk deploy VpcStack && npm run verify:vpc",
     "verify:vpc": "tsx scripts/verify-vpc.ts",
-    "destroy:vpc": "cdk destroy VpcStack"
+    "destroy:vpc": "cdk destroy VpcStack",
+    "deploy:eks": "npm run preflight && cdk deploy EksStack",
+    "deploy:workloads": "tsx scripts/deploy-workloads.ts",
+    "verify:eks": "tsx scripts/verify-eks.ts",
+    "destroy:eks": "cdk destroy EksStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",

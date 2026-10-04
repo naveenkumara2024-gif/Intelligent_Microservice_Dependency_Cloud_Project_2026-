@@ -1,0 +1,37 @@
+# OpenTelemetry Collector (contrib) config for the per-node DaemonSet.
+# Stage 6: receive OTLP from Online Boutique and log it. Stage 7 adds a `kafka`
+# exporter (topic otel.traces) to the traces pipeline once MSK exists.
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch: {}
+
+exporters:
+  # `detailed` prints resource attributes (service.name), which is how Stage 6
+  # verification sees which services are sending spans. Sampled to keep logs small.
+  debug:
+    verbosity: detailed
+    sampling_initial: 20
+    sampling_thereafter: 50
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug]

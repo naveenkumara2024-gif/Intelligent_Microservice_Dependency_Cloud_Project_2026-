@@ -20,7 +20,7 @@ Large microservice platforms (e-commerce style) generate cascading failures wher
 | Tier | AWS service | Role |
 |---|---|---|
 | Compute | Amazon EKS (multi-AZ managed node groups) | Hosts the actual microservices (demo app: Online Boutique or similar) |
-| Telemetry capture | OpenTelemetry Collector (K8s DaemonSet) | Zero-code interception of RPC/gRPC calls, emits OTLP spans |
+| Telemetry capture | OpenTelemetry Collector (K8s DaemonSet) | Receives OTLP spans that instrumented services send (it does not intercept calls itself; Online Boutique services emit OTLP when `ENABLE_TRACING=1` + `COLLECTOR_SERVICE_ADDR` are set) |
 | Streaming | Amazon MSK (Kafka) | Durable buffer absorbing bursty trace volume; topics: `otel.traces`, `otel.metrics`, `svc.events` |
 | Graph transform | AWS Lambda (TypeScript), MSK Event Source Mapping | Converts flat spans into Gremlin graph upserts |
 | Knowledge graph | Amazon Neptune (primary writer AZ-1, read replica AZ-2) | Stores services as vertices, calls as weighted directed edges |
@@ -50,11 +50,11 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 │   ├── lib/                     # vpc-stack.ts, eks-stack.ts, msk-stack.ts,
 │   │                             # neptune-stack.ts, dynamodb-stack.ts,
 │   │                             # sagemaker-stack.ts, frontend-stack.ts
-│   ├── scripts/                 # Stage 5b helpers (AWS CLI based, read-only except bootstrap):
-│   │                             # preflight.ts, bootstrap.ts, verify-vpc.ts, aws-cli.ts
-│   └── test/                    # Jest + CDK assertions (vpc-stack.test.ts)
+│   ├── scripts/                 # Stage 5b/6b helpers (AWS CLI + kubectl based): preflight, bootstrap,
+│   │                             # verify-vpc, deploy-workloads, verify-eks, aws-cli (shared)
+│   └── test/                    # Jest + CDK assertions (vpc-stack, eks-stack)
 ├── src/
-│   ├── collector/                # OTel Collector DaemonSet config
+│   ├── collector/                # OTel Collector DaemonSet + config (kustomize dir)
 │   ├── lambda-transformer/       # TypeScript, MSK → Neptune
 │   ├── ml-engine/                 # Python, GNN train + inference
 │   └── web-dashboard/             # React + Cytoscape.js, deployed S3+CloudFront
@@ -63,6 +63,7 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 │   ├── processed/                 # nodes.csv, edges.csv output (gitignored, regenerable)
 │   ├── preprocess_traces.py
 │   └── load_to_neo4j.py
+├── k8s/online-boutique/           # vendored Online Boutique manifest + tracing kustomization (Stage 6)
 ├── docker-compose.yml             # local Neo4j 5 community (Stage 2)
 ├── prompt/                        # one saved prompt per implemented stage —
 │   │                               # NOTE: folder is singular "prompt/", not "prompts/";
@@ -96,6 +97,8 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 **Stages 0–4 complete, checkpoints passed (Stages 0–2 on 2026-09-21; Stage 3 + follow-up GNN improvements; Stage 4 `cdk synth` validated).**
 
 **Stage 5 (core networking), 2026-10-04:** Phase 5a is complete (VPC/subnet tiers/endpoints/security groups in `infra-cdk/lib/vpc-stack.ts`, 10 Jest tests passing, full `cdk synth` clean). Phase 5b (deploy + verify) is wired but NOT run — no AWS credentials are configured yet. Once they are: `npm run preflight` -> `npm run bootstrap` (separate approval) -> `npm run deploy:vpc` -> `npm run destroy:vpc` after verification, all from `infra-cdk/`. IAM roles and KMS keys are deliberately created in the stack that owns the consuming resource (avoids cyclic cross-stack dependencies), not in `VpcStack`.
+
+**Stage 6 (EKS + OTel Collector), 2026-10-04:** Phase 6a is complete (`EksStack`: EKS 1.35, 2-3 x t3.large managed nodes in private-app subnets; collector DaemonSet in `src/collector/`; vendored Online Boutique v0.10.7 + tracing kustomization in `k8s/online-boutique/`; 15 Jest tests passing; full `cdk synth` clean). Phase 6b (deploy + verify) is wired but NOT run — needs Stage 5b first and AWS credentials. Order: `npm run deploy:eks` (also deploys VpcStack) -> `npm run deploy:workloads` -> `npm run verify:eks` -> `npm run destroy:eks`. **Only 7 of 11 Online Boutique services emit OTel spans** (frontend, checkout, currency, email, payment, productcatalog, recommendation); cart/shipping/ad/redis/loadgen emit none, so the live graph has no outgoing edges from them. Scripts pin kubectl to the EKS context because this workstation's kubeconfig also holds a local cluster.
 
 ## Stage implementation protocol
 
