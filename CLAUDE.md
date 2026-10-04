@@ -47,10 +47,12 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 ├── Docs/                         # literature survey, novelty summary, phase-1 report (.docx)
 ├── infra-cdk/
 │   ├── bin/app.ts
-│   └── lib/                     # vpc-stack.ts, eks-stack.ts, msk-stack.ts,
-│                                 # neptune-stack.ts, dynamodb-stack.ts,
-│                                 # sagemaker-stack.ts, frontend-stack.ts,
-│                                 # infra-cdk-stack.ts (default cdk-init leftover, unused)
+│   ├── lib/                     # vpc-stack.ts, eks-stack.ts, msk-stack.ts,
+│   │                             # neptune-stack.ts, dynamodb-stack.ts,
+│   │                             # sagemaker-stack.ts, frontend-stack.ts
+│   ├── scripts/                 # Stage 5b helpers (AWS CLI based, read-only except bootstrap):
+│   │                             # preflight.ts, bootstrap.ts, verify-vpc.ts, aws-cli.ts
+│   └── test/                    # Jest + CDK assertions (vpc-stack.test.ts)
 ├── src/
 │   ├── collector/                # OTel Collector DaemonSet config
 │   ├── lambda-transformer/       # TypeScript, MSK → Neptune
@@ -91,7 +93,9 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 14. End-to-end fault-injection demo rehearsal
 15. Ongoing: `cdk destroy` idle stacks between sessions to control cost
 
-**Stages 0–2 complete, checkpoints passed (2026-09-21). Ready to start Stage 3.**
+**Stages 0–4 complete, checkpoints passed (Stages 0–2 on 2026-09-21; Stage 3 + follow-up GNN improvements; Stage 4 `cdk synth` validated).**
+
+**Stage 5 (core networking), 2026-10-04:** Phase 5a is complete (VPC/subnet tiers/endpoints/security groups in `infra-cdk/lib/vpc-stack.ts`, 10 Jest tests passing, full `cdk synth` clean). Phase 5b (deploy + verify) is wired but NOT run — no AWS credentials are configured yet. Once they are: `npm run preflight` -> `npm run bootstrap` (separate approval) -> `npm run deploy:vpc` -> `npm run destroy:vpc` after verification, all from `infra-cdk/`. IAM roles and KMS keys are deliberately created in the stack that owns the consuming resource (avoids cyclic cross-stack dependencies), not in `VpcStack`.
 
 ## Stage implementation protocol
 

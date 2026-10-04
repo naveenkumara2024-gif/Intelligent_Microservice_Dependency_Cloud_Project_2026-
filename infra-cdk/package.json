@@ -5,7 +5,12 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "preflight": "tsx scripts/preflight.ts",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "deploy:vpc": "npm run preflight && cdk deploy VpcStack && npm run verify:vpc",
+    "verify:vpc": "tsx scripts/verify-vpc.ts",
+    "destroy:vpc": "cdk destroy VpcStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",

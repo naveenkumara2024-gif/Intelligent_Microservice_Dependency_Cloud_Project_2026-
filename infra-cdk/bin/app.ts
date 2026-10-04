@@ -8,18 +8,20 @@ import { DynamodbStack } from '../lib/dynamodb-stack';
 import { SagemakerStack } from '../lib/sagemaker-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 
-// No `env` specified: stacks stay environment-agnostic for now (no AWS
-// account/region lookups needed). Real env config arrives with Stage 5's
-// actual networking work.
+// Region is pinned (CLAUDE.md: us-east-1). The account comes from the CDK CLI
+// (CDK_DEFAULT_ACCOUNT, resolved from credentials); it is undefined when
+// running `cdk synth` without credentials, which leaves the account
+// unresolved but still synthesizes fine.
+const env = { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' };
 const app = new cdk.App();
 
-const vpcStack = new VpcStack(app, 'VpcStack');
-const eksStack = new EksStack(app, 'EksStack');
-const mskStack = new MskStack(app, 'MskStack');
-const neptuneStack = new NeptuneStack(app, 'NeptuneStack');
-const dynamodbStack = new DynamodbStack(app, 'DynamodbStack');
-const sagemakerStack = new SagemakerStack(app, 'SagemakerStack');
-const frontendStack = new FrontendStack(app, 'FrontendStack');
+const vpcStack = new VpcStack(app, 'VpcStack', { env });
+const eksStack = new EksStack(app, 'EksStack', { env });
+const mskStack = new MskStack(app, 'MskStack', { env });
+const neptuneStack = new NeptuneStack(app, 'NeptuneStack', { env });
+const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });
+const sagemakerStack = new SagemakerStack(app, 'SagemakerStack', { env });
+const frontendStack = new FrontendStack(app, 'FrontendStack', { env });
 
 // Dependency order per CLAUDE.md "Working conventions": VPC first, then
 // anything needing the VPC (EKS/MSK/Neptune), then SageMaker last (needs a
