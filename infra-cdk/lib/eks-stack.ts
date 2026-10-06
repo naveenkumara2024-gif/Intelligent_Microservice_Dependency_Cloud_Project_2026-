@@ -32,7 +32,9 @@ export class EksStack extends cdk.Stack {
     // Workloads (Online Boutique, OTel Collector) are applied with kubectl from
     // k8s/ and src/collector/, not through CDK, so no kubectl-handler Lambda.
     this.cluster.addNodegroupCapacity('PrivateAppNodes', {
-      instanceTypes: [ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE)],
+      // m7i-flex.large (2 vCPU / 8 GB) is the largest type a Free Tier-plan account may launch;
+      // t3.large fails there with "instance type is not eligible for Free Tier".
+      instanceTypes: [new ec2.InstanceType('m7i-flex.large')],
       amiType: eks.NodegroupAmiType.AL2023_X86_64_STANDARD,
       minSize: 2,
       desiredSize: 2,

@@ -215,3 +215,36 @@ Facts verified while implementing, which changed or refined the plan:
   Service) and `k8s/online-boutique` (35 documents).
 - 6b scripts (`deploy-workloads`, `verify-eks`) fail cleanly with
   `NoCredentials`; not yet run against AWS.
+
+---
+
+## 6b first-deploy failure and fix (2026-10-06)
+
+`npm run deploy:eks` failed at `AWS::EKS::Nodegroup` with
+`InvalidParameterCombination - The specified instance type is not eligible for
+Free Tier`; CloudFormation rolled `EksStack` back (`ROLLBACK_COMPLETE`). Cause:
+the account is on the AWS Free Tier plan, which only permits instance types
+with `free-tier-eligible=true` (verified with `aws ec2 describe-instance-types`:
+t3/t4g/t8i micro+small, c7i-flex.large, m7i-flex.large). Design decision 2
+(2 x t3.large) is therefore replaced by **2 x m7i-flex.large** (2 vCPU / 8 GB).
+Alternative not taken: upgrade the account to the paid plan to use t3.large.
+
+### 6b outcome (2026-10-06)
+
+Checkpoint passed on the live account: 2/2 nodes Ready (us-east-1a/b), 12/12
+Online Boutique pods Running, collector DaemonSet 2/2, spans seen from
+checkoutservice, currencyservice, emailservice, frontend, productcatalogservice,
+recommendationservice (paymentservice only emits during a checkout). Storefront
+returned HTTP 200 via `kubectl port-forward svc/frontend-external 8080:80`.
+
+Issues found and fixed during 6b:
+1. `t3.large` rejected (Free Tier plan) -> `m7i-flex.large` (see above).
+2. kubectl got "provide credentials": the cluster creator under CDK bootstrap is
+   the CloudFormation exec role, not the deploying IAM user. `deploy:workloads`
+   now idempotently creates an access entry + AmazonEKSClusterAdminPolicy for the
+   caller.
+3. Upstream's `frontend-external` is `type: LoadBalancer` (public); kept private.
+   An NLB attempt failed: "This AWS account currently does not support creating
+   load balancers" (new-account restriction; needs AWS Support or paid plan).
+4. Added `scripts/pre-destroy.ts` (wired into `destroy:eks`/`destroy:vpc`) so a
+   Kubernetes-created load balancer can never be orphaned and block VPC deletion.

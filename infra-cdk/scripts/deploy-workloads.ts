@@ -2,7 +2,7 @@
 // Creates Kubernetes resources (billable only via the cluster already running).
 import { spawnSync } from 'node:child_process';
 import * as path from 'node:path';
-import { aws, kubectlArgs, pinEksContext, REGION } from './aws-cli';
+import { aws, ensureClusterAdmin, kubectl, kubectlArgs, pinEksContext, REGION } from './aws-cli';
 
 const repoRoot = path.resolve(__dirname, '..', '..');
 
@@ -28,6 +28,26 @@ if (!kubeconfig.ok) {
   process.exit(1);
 }
 console.log(`kubeconfig updated for ${cluster.name} (${REGION})`);
+
+const admin = ensureClusterAdmin(cluster.name);
+if (!admin.principal) {
+  console.error(`Could not grant cluster-admin: ${admin.error}`);
+  process.exit(1);
+}
+console.log(`cluster-admin access entry present for ${admin.principal}`);
+
+// Access entries take a few seconds to propagate.
+let allowed = false;
+for (let attempt = 0; attempt < 12 && !allowed; attempt++) {
+  allowed = kubectl(['auth', 'can-i', '*', '*']).stdout.trim() === 'yes';
+  if (!allowed) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+  }
+}
+if (!allowed) {
+  console.error('kubectl is still not authorized after 60s; check the access entry in the EKS console.');
+  process.exit(1);
+}
 
 // Collector first so the services' OTLP endpoint exists when they start.
 kubectlRun(['apply', '-k', path.join(repoRoot, 'src', 'collector')]);

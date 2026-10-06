@@ -32,3 +32,18 @@ patches:
           valueFrom:
             fieldRef:
               fieldPath: metadata.labels['app']
+  # Upstream exposes the storefront with `type: LoadBalancer`; we keep it private
+  # (ClusterIP) and reach it with `kubectl port-forward svc/frontend-external 8080:80`.
+  # To make it public, set `type: LoadBalancer` and add the annotation
+  # `service.beta.kubernetes.io/aws-load-balancer-type: nlb` (plain HTTP, open to
+  # everyone unless `loadBalancerSourceRanges` is set). NOTE: a brand-new AWS account
+  # may refuse to create load balancers ("OperationNotPermitted"); that needs an AWS
+  # Support case or the paid plan. `npm run destroy:eks` deletes any such load
+  # balancer first so it cannot block VPC deletion.
+  - target:
+      kind: Service
+      name: frontend-external
+    patch: |-
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
