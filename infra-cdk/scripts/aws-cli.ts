@@ -117,6 +117,46 @@ export function ensureClusterAdmin(clusterName: string): { principal?: string; e
   return associated.ok ? { principal } : { error: associated.stderr };
 }
 
+/** Applies a YAML manifest string through `kubectl apply -f -`. */
+export function kubectlApplyStdin(yaml: string): CliResult {
+  const r = spawnSync('kubectl', kubectlArgs(['apply', '-f', '-']), { encoding: 'utf8', input: yaml });
+  if (r.error) {
+    return { ok: false, stdout: '', stderr: r.error.message };
+  }
+  return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: (r.stderr ?? '').trim() };
+}
+
+export interface MskInfo {
+  /** False when MskStack is not deployed (Stage 6-only mode). */
+  deployed: boolean;
+  clusterArn?: string;
+  /** Comma-separated TLS bootstrap brokers, host:9094. */
+  bootstrap?: string;
+  error?: string;
+}
+
+export function mskInfo(): MskInfo {
+  const stack = aws(['cloudformation', 'describe-stacks', '--stack-name', 'MskStack']);
+  if (!stack.ok) {
+    // CloudFormation says "does not exist" for a stack that was never deployed.
+    return /does not exist/i.test(stack.stderr) ? { deployed: false } : { deployed: false, error: stack.stderr };
+  }
+  const outputs = (JSON.parse(stack.stdout) as {
+    Stacks: { Outputs?: { OutputKey: string; OutputValue: string }[] }[];
+  }).Stacks[0]?.Outputs;
+  const clusterArn = outputs?.find((o) => o.OutputKey === 'ClusterArn')?.OutputValue;
+  if (!clusterArn) {
+    return { deployed: false, error: 'MskStack exists but has no ClusterArn output' };
+  }
+  const brokers = awsJson<{ BootstrapBrokerStringTls?: string }>([
+    'kafka', 'get-bootstrap-brokers', '--cluster-arn', clusterArn,
+  ]);
+  const bootstrap = brokers.value?.BootstrapBrokerStringTls;
+  return bootstrap
+    ? { deployed: true, clusterArn, bootstrap }
+    : { deployed: true, clusterArn, error: brokers.error ?? 'cluster has no TLS bootstrap brokers yet' };
+}
+
 export interface Check {
   name: string;
   ok: boolean;

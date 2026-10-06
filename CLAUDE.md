@@ -50,9 +50,9 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 │   ├── lib/                     # vpc-stack.ts, eks-stack.ts, msk-stack.ts,
 │   │                             # neptune-stack.ts, dynamodb-stack.ts,
 │   │                             # sagemaker-stack.ts, frontend-stack.ts
-│   ├── scripts/                 # Stage 5b/6b helpers (AWS CLI + kubectl based): preflight, bootstrap,
-│   │                             # verify-vpc, deploy-workloads, verify-eks, aws-cli (shared)
-│   └── test/                    # Jest + CDK assertions (vpc-stack, eks-stack)
+│   ├── scripts/                 # Stage 5b-7b helpers (AWS CLI + kubectl based): preflight, bootstrap,
+│   │                             # verify-vpc, deploy-workloads, verify-eks, verify-msk, pre-destroy, aws-cli (shared)
+│   └── test/                    # Jest + CDK assertions (vpc-stack, eks-stack, msk-stack)
 ├── src/
 │   ├── collector/                # OTel Collector DaemonSet + config (kustomize dir)
 │   ├── lambda-transformer/       # TypeScript, MSK → Neptune
@@ -64,6 +64,8 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 │   ├── preprocess_traces.py
 │   └── load_to_neo4j.py
 ├── k8s/online-boutique/           # vendored Online Boutique manifest + tracing kustomization (Stage 6)
+├── k8s/collector-kafka/           # kustomize overlay: collector + Kafka exporter (Stage 7)
+├── k8s/kafka-topics/              # Job creating otel.traces / otel.metrics / svc.events (Stage 7)
 ├── docker-compose.yml             # local Neo4j 5 community (Stage 2)
 ├── prompt/                        # one saved prompt per implemented stage —
 │   │                               # NOTE: folder is singular "prompt/", not "prompts/";
@@ -100,7 +102,9 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 
 **Stage 6 (EKS + OTel Collector), 2026-10-04:** Phase 6a is complete (`EksStack`: EKS 1.35, 2-3 x m7i-flex.large managed nodes (the largest type a Free Tier-plan account can launch; t3.large is rejected) in private-app subnets; collector DaemonSet in `src/collector/`; vendored Online Boutique v0.10.7 + tracing kustomization in `k8s/online-boutique/`; 15 Jest tests passing; full `cdk synth` clean). **Phase 6b verified 2026-10-06** (2/2 nodes Ready across 2 AZs, 12/12 Boutique pods Running, collector 2/2, spans seen from 6 of 7 tracing services; storefront reached via `kubectl port-forward svc/frontend-external 8080:80`). Order: `npm run deploy:eks` (also deploys VpcStack) -> `npm run deploy:workloads` -> `npm run verify:eks` -> `npm run destroy:eks` (deletes any K8s-created load balancer first) -> `npm run destroy:vpc`. **Only 7 of 11 Online Boutique services emit OTel spans** (frontend, checkout, currency, email, payment, productcatalog, recommendation); cart/shipping/ad/redis/loadgen emit none, so the live graph has no outgoing edges from them. Scripts pin kubectl to the EKS context because this workstation's kubeconfig also holds a local cluster.
 
-**AWS account constraints discovered (new account on the Free Tier plan, 2026-10-06):** (1) only `free-tier-eligible` instance types can launch — `t3.large` fails, so EKS nodes are `m7i-flex.large`; (2) the account **cannot create load balancers** (`OperationNotPermitted`) until AWS Support lifts it or the account is upgraded to the paid plan, so the storefront stays private (ClusterIP + port-forward). Anything needing an ALB/NLB (public storefront, API Gateway VPC link, ALB controller) is blocked until then. (3) Under CDK bootstrap the cluster-creator admin is CloudFormation's exec role, so `deploy:workloads` grants the caller cluster-admin via an access entry.
+**Stage 7 (MSK streaming), 2026-10-06:** Phase 7a is complete (`MskStack`: provisioned MSK, 2 x kafka.t3.small, Kafka 3.9.x, in private-data subnets, TLS-only, unauthenticated clients restricted by security group to port 9094 from the private-app subnets; collector Kafka overlay in `k8s/collector-kafka/` writing `otlp_json` spans to `otel.traces`; topic-creation Job in `k8s/kafka-topics/`; 23 Jest tests passing; full `cdk synth` clean). Phase 7b (deploy + verify) is NOT run and is **blocked: the account is not subscribed to MSK** (`SubscriptionRequiredException` from `aws kafka list-kafka-versions`; same family as the load-balancer block). Recheck for free with `aws kafka list-kafka-versions --region us-east-1`. Once clear: `npm run deploy:eks` -> `npm run deploy:msk` -> `npm run deploy:workloads` (auto-selects the Kafka collector when MskStack exists, otherwise runs the Stage 6 debug-only collector) -> `npm run verify:msk` -> `npm run destroy:msk` -> `npm run destroy:eks` -> `npm run destroy:vpc`.
+
+**AWS account constraints discovered (new account on the Free Tier plan, 2026-10-06):** (1) only `free-tier-eligible` instance types can launch — `t3.large` fails, so EKS nodes are `m7i-flex.large`; (2) the account **cannot create load balancers** and **is not subscribed to MSK** (`OperationNotPermitted`) until AWS Support lifts it or the account is upgraded to the paid plan, so the storefront stays private (ClusterIP + port-forward). Anything needing an ALB/NLB (public storefront, API Gateway VPC link, ALB controller) is blocked until then. (3) Under CDK bootstrap the cluster-creator admin is CloudFormation's exec role, so `deploy:workloads` grants the caller cluster-admin via an access entry.
 
 ## Stage implementation protocol
 

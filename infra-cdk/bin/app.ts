@@ -17,7 +17,7 @@ const app = new cdk.App();
 
 const vpcStack = new VpcStack(app, 'VpcStack', { env });
 const eksStack = new EksStack(app, 'EksStack', { env, vpc: vpcStack.vpc });
-const mskStack = new MskStack(app, 'MskStack', { env });
+const mskStack = new MskStack(app, 'MskStack', { env, vpc: vpcStack.vpc });
 const neptuneStack = new NeptuneStack(app, 'NeptuneStack', { env });
 const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });
 const sagemakerStack = new SagemakerStack(app, 'SagemakerStack', { env });

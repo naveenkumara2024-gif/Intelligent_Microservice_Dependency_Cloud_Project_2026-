@@ -1,0 +1,48 @@
+# Stage 7 variant of src/collector/otel-collector-config.yaml: same receivers/processors plus a `kafka`
+# exporter writing spans to MSK. Used via `kubectl apply -k k8s/collector-kafka`, which
+# deploy-workloads picks automatically when MskStack is deployed.
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch: {}
+
+exporters:
+  # Kept so Stage 6's `verify:eks` (reads service.name from collector logs) still works.
+  debug:
+    verbosity: detailed
+    sampling_initial: 20
+    sampling_thereafter: 50
+  kafka:
+    # KAFKA_BROKERS is "[host1:9094,host2:9094]" (from the kafka-bootstrap ConfigMap);
+    # the collector parses env values as YAML, so this becomes a list.
+    brokers: ${env:KAFKA_BROKERS}
+    tls:
+      insecure: false
+    traces:
+      topic: otel.traces
+      # JSON so the Stage 8 TypeScript Lambda can JSON.parse it without protobuf.
+      encoding: otlp_json
+    # Keep all spans of a trace on one partition.
+    partition_traces_by_id: true
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [debug, kafka]

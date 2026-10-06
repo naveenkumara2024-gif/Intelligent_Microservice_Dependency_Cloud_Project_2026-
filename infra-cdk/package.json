@@ -14,7 +14,10 @@
     "deploy:eks": "npm run preflight && cdk deploy EksStack",
     "deploy:workloads": "tsx scripts/deploy-workloads.ts",
     "verify:eks": "tsx scripts/verify-eks.ts",
-    "destroy:eks": "tsx scripts/pre-destroy.ts && cdk destroy EksStack"
+    "destroy:eks": "tsx scripts/pre-destroy.ts && cdk destroy EksStack",
+    "deploy:msk": "npm run preflight && cdk deploy MskStack",
+    "verify:msk": "tsx scripts/verify-msk.ts",
+    "destroy:msk": "cdk destroy MskStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",
