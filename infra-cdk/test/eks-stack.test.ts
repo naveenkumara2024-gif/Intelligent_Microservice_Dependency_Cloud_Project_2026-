@@ -31,10 +31,10 @@ describe('EksStack', () => {
     expect(outputs).not.toContain('privatedata');
   });
 
-  test('one managed node group: 2-3 x t3.large in private-app subnets', () => {
+  test('one managed node group: 2-3 x m7i-flex.large in private-app subnets', () => {
     template.resourceCountIs('AWS::EKS::Nodegroup', 1);
     template.hasResourceProperties('AWS::EKS::Nodegroup', {
-      InstanceTypes: ['t3.large'],
+      InstanceTypes: ['m7i-flex.large'],
       AmiType: 'AL2023_x86_64_STANDARD',
       ScalingConfig: { MinSize: 2, DesiredSize: 2, MaxSize: 3 },
     });

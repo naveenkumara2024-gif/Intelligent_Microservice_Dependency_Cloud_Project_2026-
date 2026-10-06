@@ -82,6 +82,41 @@ export function eksClusterName(): { name?: string; error?: string } {
   return name ? { name } : { error: stack.error ?? 'EksStack has no ClusterName output -- deploy it first' };
 }
 
+const CLUSTER_ADMIN_POLICY = 'arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy';
+
+/**
+ * Gives the caller cluster-admin via an EKS access entry (idempotent). Needed because the
+ * cluster's built-in creator admin is CloudFormation's execution role under CDK bootstrap,
+ * not the IAM identity running these scripts.
+ */
+export function ensureClusterAdmin(clusterName: string): { principal?: string; error?: string } {
+  const identity = awsJson<{ Arn: string; Account: string }>(['sts', 'get-caller-identity']);
+  if (!identity.value) {
+    return { error: identity.error };
+  }
+  // assumed-role session ARNs are not valid principals; use the underlying role ARN.
+  const principal = identity.value.Arn.replace(
+    /^arn:aws:sts::(\d+):assumed-role\/([^/]+)\/.*$/,
+    'arn:aws:iam::$1:role/$2',
+  );
+
+  const entries = awsJson<{ accessEntries: string[] }>(['eks', 'list-access-entries', '--cluster-name', clusterName]);
+  if (!entries.value) {
+    return { error: entries.error };
+  }
+  if (!entries.value.accessEntries.includes(principal)) {
+    const created = aws(['eks', 'create-access-entry', '--cluster-name', clusterName, '--principal-arn', principal]);
+    if (!created.ok) {
+      return { error: created.stderr };
+    }
+  }
+  const associated = aws([
+    'eks', 'associate-access-policy', '--cluster-name', clusterName, '--principal-arn', principal,
+    '--policy-arn', CLUSTER_ADMIN_POLICY, '--access-scope', 'type=cluster',
+  ]);
+  return associated.ok ? { principal } : { error: associated.stderr };
+}
+
 export interface Check {
   name: string;
   ok: boolean;
