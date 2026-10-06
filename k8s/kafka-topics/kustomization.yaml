@@ -1,0 +1,7 @@
+# Creates the three Kafka topics. Run by scripts/deploy-workloads.ts (which deletes the
+# finished Job first, since Jobs are immutable). Needs the kafka-bootstrap ConfigMap.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - job.yaml

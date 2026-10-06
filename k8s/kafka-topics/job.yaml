@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+spec:
+  backoffLimit: 4
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: kafka-topics
+          image: apache/kafka:3.9.0
+          env:
+            - name: BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: kafka-bootstrap
+                  key: bootstrap
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              echo "security.protocol=SSL" > /tmp/client.properties
+              for topic in otel.traces otel.metrics svc.events; do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
+                  --command-config /tmp/client.properties \
+                  --create --if-not-exists --topic "$topic" \
+                  --partitions 3 --replication-factor 2
+              done
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" \
+                --command-config /tmp/client.properties --list
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

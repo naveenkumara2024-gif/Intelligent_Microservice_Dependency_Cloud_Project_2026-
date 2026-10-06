@@ -188,3 +188,54 @@ data (nothing valuable at this stage; the load generator regenerates traffic).
 - IAM (SASL) authentication, a customer-managed KMS key, broker log delivery.
 - Metrics or logs pipelines (the topics exist but stay empty).
 - Commit/push: separate approvals after each checkpoint.
+
+---
+
+## Phase 7a as built (2026-10-06) — deviations from the plan above
+
+- **Kafka overlay instead of an unconditional exporter** (replaces design
+  decision 10). Making the exporter unconditional would crash the working Stage 6
+  collector whenever MSK is absent, and the account currently cannot deploy MSK.
+  Instead: `src/collector/` stays the Stage 6 debug-only collector, and
+  `k8s/collector-kafka/` is a kustomize overlay (new config with the `kafka`
+  exporter + `KAFKA_BROKERS` env on the DaemonSet). `deploy-workloads` picks the
+  overlay when `MskStack` exists and otherwise warns and deploys the Stage 6
+  collector. The overlay lives outside `src/collector/` because kustomize rejects a
+  base that contains its own overlay ("cycle detected").
+- **Kafka version `3.9.x`** (MSK docs: recommended, last version supporting both
+  ZooKeeper and KRaft). The version list could not be queried from the CLI
+  (subscription block), so the doc page was the source; confirm with
+  `aws kafka list-kafka-versions` once the account is cleared. `kafka.t3.small`
+  is a supported standard broker type per the docs.
+- **Files added**: `lib/msk-stack.ts`, `test/msk-stack.test.ts` (7 tests),
+  `k8s/collector-kafka/`, `k8s/kafka-topics/`, `scripts/verify-msk.ts`;
+  `deploy-workloads.ts` publishes the `kafka-bootstrap` ConfigMap (`brokers` as a
+  YAML list for the collector, `bootstrap` as a plain comma list for the Job),
+  runs the topic Job, and restarts the DaemonSet; npm scripts `deploy:msk`,
+  `verify:msk`, `destroy:msk`.
+- **Not yet proven** (needs a real MSK): that `${env:KAFKA_BROKERS}` expands to a
+  list in the collector, the exporter key names against a running v0.160.0, the
+  topic Job's `apache/kafka:3.9.0` client against TLS brokers, and
+  `otlp_json` message shape as `verify-msk` parses it.
+
+### 7a checkpoint results
+
+- `npx tsc` clean; `npx jest`: 4 suites, 23/23 pass (8 new MSK tests).
+- `npx cdk synth` (all stacks): success, no cycles. `MskStack` template: 1
+  cluster, 1 configuration, 1 security group, no IAM roles or Lambdas.
+- `kubectl kustomize` renders `src/collector`, `k8s/collector-kafka` (DaemonSet has
+  `KAFKA_BROKERS` from `kafka-bootstrap`, ConfigMap has the Kafka exporter) and
+  `k8s/kafka-topics`.
+- `verify:msk` / `mskInfo()` fail or report `deployed:false` cleanly when MSK or EKS
+  is absent. Nothing was deployed to AWS.
+
+### Self-audit correction (2026-10-06)
+
+The first 7a version had a real bug that its own tests encoded: the broker security
+group allowed only client TCP 9094 and blocked all egress, with no rule letting the
+two brokers talk to each other (replication / metadata). A real deploy would likely
+have hung or never become healthy. Fixed: open egress (the private-data subnets have
+no internet route, so it cannot leave the VPC) plus a self-referencing all-traffic
+ingress rule; a test now asserts both, and a clean synth confirms them. Also corrected
+the Stage 6 collector config comment, which still said Kafka would be added to that file.
+Lesson for 7b: the first MSK deploy is still the real test of broker health.

@@ -1,6 +1,7 @@
 # OpenTelemetry Collector (contrib) config for the per-node DaemonSet.
-# Stage 6: receive OTLP from Online Boutique and log it. Stage 7 adds a `kafka`
-# exporter (topic otel.traces) to the traces pipeline once MSK exists.
+# Stage 6: receive OTLP from Online Boutique and log it (debug exporter only). The Kafka-
+# exporting variant lives in k8s/collector-kafka/ (Stage 7) and is chosen by deploy-workloads
+# when MSK is deployed.
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
