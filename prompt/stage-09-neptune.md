@@ -1,7 +1,8 @@
 # Stage 9 — Amazon Neptune (knowledge graph) and parity check against Stage 2
 
 Status: **Phase 9a APPROVED and COMPLETE (2026-10-12)** — see "Phase 9a as built" at the end.
-Phase 9b (deploy and verify, billable) needs its own approval and has NOT been run. Phase 9c
+**Phase 9b was attempted 2026-10-12 and BLOCKED by the account plan** — see "Phase 9b attempt" at
+the end. Phase 9c
 (live end-to-end through MSK) is **deferred** until the MSK subscription is fixed; see "Resume
 protocol". Phases are approved separately (CLAUDE.md "Stage implementation protocol").
 
@@ -278,3 +279,23 @@ to Neptune (the read replica is useful there).
 - Neptune-side behaviour of `property(key, traversal)` on edges, the `ConcurrentModification` retry
   path, and the cold-create race.
 - Probe Lambda reaching Neptune through the SG rule from the private-app subnets.
+
+---
+
+## Phase 9b attempt (2026-10-12) — BLOCKED by the Free Tier plan
+
+- Preflight passed (credentials, budget alert, CDK bootstrap); `cdk diff` reviewed; the user ran
+  `npm run deploy:neptune` (the auto-mode classifier blocks my own `cdk deploy`).
+- `VpcStack` created. `NeptuneStack` failed on `AWS::Neptune::DBCluster`:
+  > The specified cluster engine type is not available with free plan accounts. Available engine
+  > types: [aurora-postgresql]. To remove all limitations, upgrade your account plan.
+  (HTTP 400 from Neptune, `HandlerErrorCode: InternalFailure`). CloudFormation rolled back; the
+  stack is `ROLLBACK_COMPLETE`, no cluster, instance or snapshot exists.
+- This is the risk the plan flagged ("restrictions surface at create time"). It is the same family
+  as the MSK `SubscriptionRequiredException` and the load-balancer refusal: the account plan, not
+  the code. **Upgrading the account plan is the single action that unblocks 7b, 8b, 9b and 9c.**
+- Not worked around: no alternative engine or service substitution was attempted (Neptune is the
+  project's chosen knowledge graph; `aurora-postgresql` is not a Gremlin store).
+- Nothing in 9a is invalidated: every 9a result stands, and 9b's checkpoint is unchanged.
+- Cleanup owed: `npm run destroy:neptune` (deletes the ROLLBACK_COMPLETE shell), then
+  `npm run destroy:vpc` (stops the NAT gateway and interface endpoints, billed hourly).
