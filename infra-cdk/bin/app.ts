@@ -50,11 +50,12 @@ const transformerStack = new TransformerStack(app, 'TransformerStack', {
 
 // Dependency order per CLAUDE.md "Working conventions": VPC first, then
 // anything needing the VPC (EKS/MSK/Neptune), then SageMaker last (needs a
-// trained model artifact to actually deploy).
+// trained model artifact to actually deploy). SagemakerStack references nothing in
+// DynamodbStack (the endpoint is self-contained), so it declares no dependency on it;
+// the Stage 11 scorer Lambda is what will tie them together.
 eksStack.addStackDependency(vpcStack);
 mskStack.addStackDependency(vpcStack);
 neptuneStack.addStackDependency(vpcStack);
-sagemakerStack.addStackDependency(dynamodbStack);
 transformerStack.addStackDependency(mskStack);
 if (graphBackend === 'neptune') {
   transformerStack.addStackDependency(neptuneStack);
