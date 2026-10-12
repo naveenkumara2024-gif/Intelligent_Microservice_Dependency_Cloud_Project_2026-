@@ -11,5 +11,15 @@ services:
     volumes:
       - neo4j_data:/data
 
+  # Stage 8: local TinkerPop Gremlin Server (in-memory TinkerGraph, no auth) to exercise the
+  # Lambda transformer's Gremlin writer. 3.7.x matches the series Neptune supports (3.7.1-3.7.3).
+  # Start with:  docker compose --profile gremlin up -d gremlin-server
+  gremlin-server:
+    image: tinkerpop/gremlin-server:3.7.3
+    container_name: rca-gremlin
+    profiles: ["gremlin"]
+    ports:
+      - "8182:8182"
+
 volumes:
   neo4j_data:

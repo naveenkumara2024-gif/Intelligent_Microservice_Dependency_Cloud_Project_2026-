@@ -1,17 +1,28 @@
 {
   "name": "lambda-transformer",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Stage 8: MSK spans -> Gremlin graph upserts (AWS Lambda)",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "test:integration": "jest --config jest.int.config.js --runInBand",
+    "build": "esbuild src/handler.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@swc/core": "^1.16.13",
+    "@swc/jest": "^0.2.39",
+    "@types/jest": "^30.0.0",
     "@types/node": "^26.6.2",
+    "esbuild": "^0.28.2",
+    "jest": "^30.5.2",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "gremlin": "3.7.3"
   }
 }
