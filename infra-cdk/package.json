@@ -20,7 +20,10 @@
     "destroy:msk": "cdk destroy MskStack",
     "deploy:transformer": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy TransformerStack",
     "verify:transformer": "tsx scripts/verify-transformer.ts",
-    "destroy:transformer": "cdk destroy TransformerStack"
+    "destroy:transformer": "cdk destroy TransformerStack",
+    "deploy:neptune": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy NeptuneStack",
+    "verify:neptune": "tsx scripts/verify-neptune.ts",
+    "destroy:neptune": "cdk destroy NeptuneStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",

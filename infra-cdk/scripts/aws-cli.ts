@@ -161,11 +161,13 @@ export interface Check {
   name: string;
   ok: boolean;
   detail: string;
+  /** A failed check that is a finding, not a broken contract: printed as WARN, does not fail the run. */
+  warn?: boolean;
 }
 
 export function report(checks: Check[]): boolean {
   for (const c of checks) {
-    console.log(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}: ${c.detail}`);
+    console.log(`${c.ok ? 'PASS' : c.warn ? 'WARN' : 'FAIL'}  ${c.name}: ${c.detail}`);
   }
-  return checks.every((c) => c.ok);
+  return checks.every((c) => c.ok || c.warn);
 }

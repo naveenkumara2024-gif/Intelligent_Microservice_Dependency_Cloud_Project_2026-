@@ -8,6 +8,7 @@
 // All upserts are idempotent; counters are incremented by the batch's amounts.
 import gremlin from 'gremlin';
 import { Aggregate, BUCKET_COUNT, EdgeAgg, NodeAgg } from '../aggregate';
+import { CredentialsProvider, credentialsFromEnv, signGetHeaders } from './sigv4';
 import { GraphWriter, WriteResult } from './types';
 
 const { traversal } = gremlin.process.AnonymousTraversalSource;
@@ -22,15 +23,29 @@ const MAX_ATTEMPTS = 4;
 export interface GremlinWriterOptions {
   /** e.g. wss://<neptune-endpoint>:8182/gremlin or ws://localhost:8182/gremlin */
   url: string;
-  /** SigV4-signed connections are a Stage 9 (Neptune) decision and are not implemented yet. */
+  /**
+   * Sign the connection with SigV4 (Neptune IAM database authentication). The connection is
+   * then opened on first use, because signing is asynchronous.
+   */
   iamAuth?: boolean;
+  /** Region used for signing; defaults to AWS_REGION, then us-east-1. */
+  region?: string;
+  /** Credentials used for signing; defaults to the Lambda environment's. */
+  credentials?: CredentialsProvider;
 }
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** True for errors worth retrying: concurrent updates to the same element, or a transient timeout. */
+const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
+
+/** True when the socket itself is gone, so the next attempt needs a new (re-signed) connection. */
+export function isConnectionError(err: unknown): boolean {
+  return /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|not open|connection (is )?closed|WebSocket was closed/i.test(messageOf(err));
+}
+
+/** True for errors worth retrying: concurrent updates to the same element, a transient timeout, or a lost connection. */
 export function isRetryable(err: unknown): boolean {
-  return /ConcurrentModification|ConcurrentUpdate|Timeout|timed out|ECONNRESET/i.test(String((err as Error)?.message ?? err));
+  return /ConcurrentModification|ConcurrentUpdate|Timeout|timed out/i.test(messageOf(err)) || isConnectionError(err);
 }
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -80,25 +95,56 @@ export function edgeTraversal(g: any, edges: EdgeAgg[]): any {
 }
 
 export class GremlinWriter implements GraphWriter {
-  private readonly connection: any;
-  private readonly g: any;
+  private connection: any;
+  private g: any;
 
-  constructor(options: GremlinWriterOptions) {
-    if (options.iamAuth) {
-      throw new Error('IAM (SigV4) authentication for Neptune is implemented in Stage 9; use an unauthenticated endpoint until then');
-    }
-    this.connection = new DriverRemoteConnection(options.url, {});
+  constructor(private readonly options: GremlinWriterOptions) {
+    // Unauthenticated connections open immediately; IAM ones open on first use (signing is async).
+    if (!options.iamAuth) this.open({});
+  }
+
+  private open(headers: Record<string, string>): void {
+    this.connection = new DriverRemoteConnection(this.options.url, Object.keys(headers).length > 0 ? { headers } : {});
     this.g = traversal().withRemote(this.connection);
   }
 
-  private async submit(build: () => any): Promise<void> {
+  /** The traversal source, opening (and signing) the connection first when needed. */
+  async connectedSource(): Promise<any> {
+    if (!this.g) {
+      const headers = this.options.iamAuth
+        ? await signGetHeaders({
+            url: this.options.url,
+            region: this.options.region ?? process.env.AWS_REGION ?? 'us-east-1',
+            credentials: await (this.options.credentials ?? credentialsFromEnv)(),
+          })
+        : {};
+      this.open(headers);
+    }
+    return this.g;
+  }
+
+  /** Drops the connection so the next use opens a new one (with fresh signed headers under IAM). */
+  private async reset(): Promise<void> {
+    const connection = this.connection;
+    this.connection = undefined;
+    this.g = undefined;
+    try {
+      await connection?.close();
+    } catch {
+      // the socket is already gone
+    }
+  }
+
+  private async submit(build: (g: any) => any): Promise<void> {
     for (let attempt = 1; ; attempt++) {
       try {
+        const g = await this.connectedSource();
         // Each traversal is one request; Neptune applies a request atomically, so a retry cannot double-apply.
-        await build().iterate();
+        await build(g).iterate();
         return;
       } catch (err) {
         if (attempt >= MAX_ATTEMPTS || !isRetryable(err)) throw err;
+        if (isConnectionError(err)) await this.reset();
         await sleep(50 * attempt + Math.random() * 150);
       }
     }
@@ -107,20 +153,21 @@ export class GremlinWriter implements GraphWriter {
   async write(batch: Aggregate): Promise<WriteResult> {
     // Nodes first: the edge upserts look both endpoints up by name.
     for (const part of chunks(batch.nodes, CHUNK)) {
-      await this.submit(() => nodeTraversal(this.g, part));
+      await this.submit((g) => nodeTraversal(g, part));
     }
     for (const part of chunks(batch.edges, CHUNK)) {
-      await this.submit(() => edgeTraversal(this.g, part));
+      await this.submit((g) => edgeTraversal(g, part));
     }
     return { nodes: batch.nodes.length, edges: batch.edges.length };
   }
 
-  /** Test helper and diagnostics: the underlying traversal source. */
+  /** Test helper and diagnostics: the traversal source of an already-open connection. */
   get source(): any {
+    if (!this.g) throw new Error('not connected yet: IAM connections open on first use; use connectedSource()');
     return this.g;
   }
 
   async close(): Promise<void> {
-    await this.connection.close();
+    await this.reset();
   }
 }

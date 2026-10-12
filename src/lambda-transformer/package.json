@@ -1,13 +1,15 @@
 {
   "name": "lambda-transformer",
   "version": "1.0.0",
-  "description": "Stage 8: MSK spans -> Gremlin graph upserts (AWS Lambda)",
+  "description": "Stages 8-9: MSK spans -> Gremlin graph upserts (AWS Lambda) and the Neptune verification probe",
   "main": "dist/index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:integration": "jest --config jest.int.config.js --runInBand",
-    "build": "esbuild src/handler.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate"
+    "build": "npm run build:handler && npm run build:probe",
+    "build:handler": "esbuild src/handler.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate",
+    "build:probe": "esbuild src/probe.ts --bundle --platform=node --target=node22 --outfile=dist/probe.js --external:bufferutil --external:utf-8-validate"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +25,9 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "5.2.0",
+    "@smithy/protocol-http": "5.6.2",
+    "@smithy/signature-v4": "5.7.4",
     "gremlin": "3.7.3"
   }
 }

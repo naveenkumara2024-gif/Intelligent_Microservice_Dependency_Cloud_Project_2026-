@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { MskStack } from '../lib/msk-stack';
+import { NeptuneStack } from '../lib/neptune-stack';
 import { TransformerStack } from '../lib/transformer-stack';
 import { VpcStack } from '../lib/vpc-stack';
 
@@ -87,5 +88,54 @@ describe('TransformerStack', () => {
   test('exports the function and log group names for the verify script', () => {
     template.hasOutput('FunctionName', {});
     template.hasOutput('LogGroupName', {});
+  });
+
+  test('without a Neptune target it has no neptune-db permission at all', () => {
+    const statements = Object.values(template.findResources('AWS::IAM::Policy')).flatMap(
+      (p: any) => p.Properties.PolicyDocument.Statement,
+    );
+    expect(JSON.stringify(statements)).not.toContain('neptune-db');
+  });
+});
+
+describe('TransformerStack with graphBackend=neptune', () => {
+  const app2 = new cdk.App();
+  const vpc2 = new VpcStack(app2, 'TestVpcStack2', { env });
+  const msk2 = new MskStack(app2, 'TestMskStack2', { env, vpc: vpc2.vpc });
+  const neptune2 = new NeptuneStack(app2, 'TestNeptuneStack2', { env, vpc: vpc2.vpc });
+  const stack2 = new TransformerStack(app2, 'TestTransformerStack2', {
+    env,
+    vpc: vpc2.vpc,
+    mskClusterArn: msk2.cluster.attrArn,
+    neptune: {
+      endpoint: neptune2.cluster.attrEndpoint,
+      port: neptune2.cluster.attrPort,
+      resourceId: neptune2.cluster.attrClusterResourceId,
+    },
+  });
+  const t2 = Template.fromStack(stack2);
+  const fn2 = () => Object.values(t2.findResources('AWS::Lambda::Function'))[0] as any;
+
+  test('writes through the Gremlin backend with IAM authentication to the cluster endpoint', () => {
+    const vars = fn2().Properties.Environment.Variables;
+    expect(vars.GRAPH_BACKEND).toBe('gremlin');
+    expect(vars.NEPTUNE_IAM_AUTH).toBe('true');
+    expect(JSON.stringify(vars.GREMLIN_URL)).toContain('wss://');
+    expect(JSON.stringify(vars.GREMLIN_URL)).toContain('/gremlin');
+  });
+
+  test('may read and write the graph, scoped to the cluster, and may NOT delete or administer it', () => {
+    const statements = Object.values(t2.findResources('AWS::IAM::Policy')).flatMap(
+      (p: any) => p.Properties.PolicyDocument.Statement,
+    );
+    const neptune = statements.filter((s: any) => [].concat(s.Action).some((a: string) => a.startsWith('neptune-db:')));
+    expect(neptune).toHaveLength(1);
+    expect(neptune[0].Action).toEqual(['neptune-db:ReadDataViaQuery', 'neptune-db:WriteDataViaQuery']);
+    expect(JSON.stringify(neptune[0].Resource)).not.toBe('"*"');
+  });
+
+  test('the MSK trigger is unchanged by the backend switch', () => {
+    t2.resourceCountIs('AWS::Lambda::EventSourceMapping', 1);
+    t2.hasResourceProperties('AWS::Lambda::EventSourceMapping', { Topics: ['otel.traces'] });
   });
 });
