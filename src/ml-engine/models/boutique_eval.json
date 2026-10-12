@@ -1,0 +1,30 @@
+{
+  "weights": "models\\model_small.pt",
+  "weights_sha256": "d77fda205a826efbe312aaba15e0381c5bd13d7a3727220636cf5245ade4dd35",
+  "topology": "12 nodes, 16 edges (volumes synthetic)",
+  "proportional": {
+    "scenarios": 600,
+    "candidates": 11,
+    "top1": 0.655,
+    "top3": 0.9866666666666667,
+    "trivial_top1": 0.37333333333333335,
+    "trivial_top3": 0.98,
+    "random_top1": 0.09090909090909091,
+    "random_top3": 0.2727272727272727
+  },
+  "faithful": {
+    "scenarios": 600,
+    "candidates": 11,
+    "top1": 0.4066666666666667,
+    "top3": 0.8166666666666667,
+    "trivial_top1": 0.21166666666666667,
+    "trivial_top3": 0.6466666666666666,
+    "random_top1": 0.09090909090909091,
+    "random_top3": 0.2727272727272727
+  },
+  "gate": {
+    "top1_min": 0.6,
+    "top3_min": 0.9,
+    "met": true
+  }
+}
