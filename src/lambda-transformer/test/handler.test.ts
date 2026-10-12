@@ -1,5 +1,6 @@
 import { Aggregate } from '../src/aggregate';
 import { getWriter, handler, setWriter } from '../src/handler';
+import { GremlinWriter } from '../src/writers/gremlin';
 import { LogWriter } from '../src/writers/log';
 import { GraphWriter } from '../src/writers/types';
 import { clientCall, mskEvent, traceMessage } from './fixtures';
@@ -86,7 +87,10 @@ describe('getWriter', () => {
     expect(() => getWriter({ GRAPH_BACKEND: 'gremlin' })).toThrow(/GREMLIN_URL/);
   });
 
-  test('refuses IAM auth until Stage 9 implements it, instead of silently connecting unsigned', () => {
-    expect(() => getWriter({ GRAPH_BACKEND: 'gremlin', GREMLIN_URL: 'wss://x:8182/gremlin', NEPTUNE_IAM_AUTH: 'true' })).toThrow(/Stage 9/);
+  test('NEPTUNE_IAM_AUTH=true builds a signing writer that has not connected yet (no network at construction)', async () => {
+    const writer = getWriter({ GRAPH_BACKEND: 'gremlin', GREMLIN_URL: 'wss://x:8182/gremlin', NEPTUNE_IAM_AUTH: 'true' });
+    expect(writer).toBeInstanceOf(GremlinWriter);
+    // IAM connections open on first use, so `source` is unavailable until then.
+    expect(() => (writer as GremlinWriter).source).toThrow(/connectedSource/);
   });
 });

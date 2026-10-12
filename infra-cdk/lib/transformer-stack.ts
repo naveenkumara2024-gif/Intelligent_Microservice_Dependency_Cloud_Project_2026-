@@ -2,20 +2,32 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { BUNDLE_DIR } from './lambda-bundle';
+import { neptuneDbArn } from './neptune-stack';
 import { SUBNET_PRIVATE_APP } from './vpc-stack';
 
-// Output of `npm run build` in src/lambda-transformer (esbuild bundle; gitignored).
-export const BUNDLE_DIR = path.join(__dirname, '..', '..', 'src', 'lambda-transformer', 'dist');
 export const SOURCE_TOPIC = 'otel.traces';
+
+/** Where the transformer writes the graph. Chosen at deploy time with `-c graphBackend=neptune`. */
+export interface NeptuneTarget {
+  /** Cluster endpoint (CfnDBCluster.attrEndpoint) and port. */
+  readonly endpoint: string;
+  readonly port: string;
+  /** Cluster resource id (cluster-XXXX), which Neptune IAM authorization uses in ARNs. */
+  readonly resourceId: string;
+}
 
 export interface TransformerStackProps extends cdk.StackProps {
   readonly vpc: ec2.IVpc;
   /** ARN of the MSK cluster the collector writes spans to (MskStack). */
   readonly mskClusterArn: string;
+  /** When set, upserts go to Neptune (IAM-authenticated); otherwise they are logged (GRAPH_BACKEND=log). */
+  readonly neptune?: NeptuneTarget;
 }
 
 export class TransformerStack extends cdk.Stack {
@@ -57,12 +69,27 @@ export class TransformerStack extends cdk.Stack {
         retention: logs.RetentionDays.ONE_WEEK,
         removalPolicy: cdk.RemovalPolicy.DESTROY,
       }),
-      environment: {
-        // No graph database exists until Stage 9: log the upserts instead. Stage 9 switches this
-        // to `gremlin` and sets GREMLIN_URL to the Neptune endpoint.
-        GRAPH_BACKEND: 'log',
-      },
+      environment: props.neptune
+        ? {
+            GRAPH_BACKEND: 'gremlin',
+            GREMLIN_URL: `wss://${props.neptune.endpoint}:${props.neptune.port}/gremlin`,
+            NEPTUNE_IAM_AUTH: 'true',
+          }
+        : {
+            // Default: log the upserts. Deploy with `-c graphBackend=neptune` once NeptuneStack exists.
+            GRAPH_BACKEND: 'log',
+          },
     });
+
+    if (props.neptune) {
+      // Upserts read before they write (coalesce), so both actions are needed. No delete.
+      this.function.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['neptune-db:ReadDataViaQuery', 'neptune-db:WriteDataViaQuery'],
+          resources: [neptuneDbArn(this, props.neptune.resourceId)],
+        }),
+      );
+    }
 
     // MSK trigger. The cluster allows unauthenticated TLS clients, so no secret is configured. Parallelism is
     // bounded by the topic's 3 partitions (reserved concurrency is avoided: new accounts keep a low quota).

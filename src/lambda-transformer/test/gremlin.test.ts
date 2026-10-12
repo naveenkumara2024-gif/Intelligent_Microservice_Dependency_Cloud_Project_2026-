@@ -2,7 +2,7 @@
 // any server. The real behaviour (idempotency, counters) is covered by gremlin.int.test.ts.
 import gremlin from 'gremlin';
 import { aggregate } from '../src/aggregate';
-import { edgeTraversal, isRetryable, nodeTraversal } from '../src/writers/gremlin';
+import { edgeTraversal, isConnectionError, isRetryable, nodeTraversal } from '../src/writers/gremlin';
 
 // A traversal source with no server behind it: enough to build traversals and read their bytecode.
 const g = () => gremlin.process.AnonymousTraversalSource.traversal().withGraph(new gremlin.structure.Graph());
@@ -63,7 +63,20 @@ describe('isRetryable', () => {
     'read ECONNRESET',
   ])('retries %p', (msg) => expect(isRetryable(new Error(msg))).toBe(true));
 
-  test.each(['MalformedQueryException', 'Authentication failed'])('does not retry %p', (msg) =>
-    expect(isRetryable(new Error(msg))).toBe(false),
+  test.each(['MalformedQueryException', 'Authentication failed', 'Unexpected server response: 403'])(
+    'does not retry %p',
+    (msg) => expect(isRetryable(new Error(msg))).toBe(false),
+  );
+});
+
+describe('isConnectionError', () => {
+  test.each(['read ECONNRESET', 'connect ECONNREFUSED 10.0.0.1:8182', 'write EPIPE', 'socket hang up', 'WebSocket is not open'])(
+    'a lost socket (%p) needs a new, re-signed connection',
+    (msg) => expect(isConnectionError(new Error(msg))).toBe(true),
+  );
+
+  test.each(['ConcurrentModificationException', 'Request timed out'])(
+    'a server-side error (%p) keeps the connection',
+    (msg) => expect(isConnectionError(new Error(msg))).toBe(false),
   );
 });

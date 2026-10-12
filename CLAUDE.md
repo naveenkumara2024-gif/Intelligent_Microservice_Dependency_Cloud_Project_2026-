@@ -51,11 +51,13 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 │   │                             # neptune-stack.ts, dynamodb-stack.ts,
 │   │                             # sagemaker-stack.ts, frontend-stack.ts
 │   ├── scripts/                 # Stage 5b-7b helpers (AWS CLI + kubectl based): preflight, bootstrap,
-│   │                             # verify-vpc, deploy-workloads, verify-eks, verify-msk, verify-transformer, pre-destroy, aws-cli (shared)
-│   └── test/                    # Jest + CDK assertions (vpc-stack, eks-stack, msk-stack, transformer-stack)
+│   │                             # verify-vpc, deploy-workloads, verify-eks, verify-msk, verify-transformer, verify-neptune
+│   │                             # (+ neptune-parity, neo4j-baseline: pure/Docker helpers), pre-destroy, aws-cli (shared)
+│   └── test/                    # Jest + CDK assertions (vpc, eks, msk, transformer, neptune stacks; neptune-parity, neo4j-baseline)
 ├── src/
 │   ├── collector/                # OTel Collector DaemonSet + config (kustomize dir)
-│   ├── lambda-transformer/       # TypeScript, MSK → Gremlin (src/, test/, esbuild bundle in dist/)
+│   ├── lambda-transformer/       # TypeScript, MSK → Gremlin (src/, test/, esbuild bundles dist/index.js + dist/probe.js);
+│   │                             # src/probe.ts = Stage 9 in-VPC Neptune verification Lambda
 │   ├── ml-engine/                 # Python, GNN train + inference
 │   └── web-dashboard/             # React + Cytoscape.js, deployed S3+CloudFront
 ├── Dataset/                       # case-insensitive match for "dataset/" on Windows
@@ -88,7 +90,7 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 6. Microservices + OTel Collector deployed to EKS
 7. MSK streaming pipeline wired
 8. Lambda graph transformer deployed (port logic from step 1)
-9. Neptune deployed, live topology verified against Stage 2's Neo4j prototype
+9. Neptune deployed, live topology verified against Stage 2's Neo4j prototype (9a code done; 9b deploy pending approval; 9c live path needs 7b/8b)
 10. SageMaker endpoint hosting the trained model
 11. DynamoDB incident persistence
 12. SNS alerting (Slack/PagerDuty)
@@ -105,6 +107,8 @@ Intelligent_Microservice_Dependency_Cloud_Project_2026-/   # actual folder name 
 **Stage 7 (MSK streaming), 2026-10-06:** Phase 7a is complete (`MskStack`: provisioned MSK, 2 x kafka.t3.small, Kafka 3.9.x, in private-data subnets, TLS-only, unauthenticated clients restricted by security group to port 9094 from the private-app subnets; collector Kafka overlay in `k8s/collector-kafka/` writing `otlp_json` spans to `otel.traces`; topic-creation Job in `k8s/kafka-topics/`; 23 Jest tests passing; full `cdk synth` clean). Phase 7b (deploy + verify) is NOT run and is **blocked: the account is not subscribed to MSK** (`SubscriptionRequiredException` from `aws kafka list-kafka-versions`; same family as the load-balancer block). Recheck for free with `aws kafka list-kafka-versions --region us-east-1`. Once clear: `npm run deploy:eks` -> `npm run deploy:msk` -> `npm run deploy:workloads` (auto-selects the Kafka collector when MskStack exists, otherwise runs the Stage 6 debug-only collector) -> `npm run verify:msk` -> `npm run destroy:msk` -> `npm run destroy:eks` -> `npm run destroy:vpc`.
 
 **Stage 8 (Lambda graph transformer), 2026-10-09:** Phase 8a is complete (`src/lambda-transformer`: OTLP/JSON parser, CLIENT-span edge derivation, batch aggregation, `GremlinWriter` + `LogWriter`, esbuild bundle; `TransformerStack` = Lambda in private-app + MSK `otel.traces` trigger, `GRAPH_BACKEND=log` until Neptune exists; 77 unit + 6 integration tests against a real local Gremlin Server 3.7.3, 32 infra tests, full `cdk synth` clean). Gremlin client is pinned to **3.7.3** to match Neptune (TinkerPop 3.7.1-3.7.3). Graph contract: edges store `call_count`, `latency_sum_ms` (avg = sum/count), `latency_recent_avg_ms`, `last_seen_ms`, histogram `h0..h9` (p95 estimated by `estimateP95`); this deliberately differs from Stage 2's batch `avg/p95_latency_ms`. Phase 8b (deploy + verify) is NOT run and is blocked by the same MSK subscription issue. Local test loop: `docker compose --profile gremlin up -d gremlin-server` then `npm run test:integration` in `src/lambda-transformer`. Heads-up for Stage 10: the GNN is inductive but normalized against the Alibaba graph, so scoring Boutique needs re-normalization or a short retrain.
+
+**Stage 9 (Neptune), 2026-10-12, built OUT OF ORDER while 7b/8b are blocked:** Phase 9a is complete (`NeptuneStack`: provisioned `db.t4g.medium` writer (read replica only with `-c neptuneReplica=true`), engine pinned `1.4.8.0`, IAM database auth ON, KMS-encrypted, private-data subnets, SG 8182 from private-app CIDRs only, `DeletionPolicy: Delete` + no deletion protection + 1-day backups so teardown leaves no snapshot; in-VPC **probe Lambda** (`src/lambda-transformer/src/probe.ts`) because Neptune has no public endpoint. `GremlinWriter` now signs the WebSocket handshake with SigV4 (`neptune-db`), opens on first use and re-signs on reconnect. `TransformerStack` takes `-c graphBackend=log|neptune` (default `log`, so 8b is independent of Neptune). 110 unit + 16 integration tests, 68 infra tests, full `cdk synth` clean; the whole parity path was rehearsed locally (Gremlin Server vs `Dataset/processed` CSVs vs the real Neo4j: identical for the top-2,000 subset and the full 16,115-edge graph). **Phase 9b (deploy + verify) is NOT run and needs its own approval**: `npm run deploy:neptune` -> `npm run verify:neptune` (`-- --full`, `--limit=N`, `--skip-neo4j`) -> `npm run destroy:neptune` -> `npm run destroy:vpc`. Risks only 9b can retire: Free Tier plan may refuse the cluster at create time; engine 1.4.8.0 documents Gremlin 3.7.1 while the client is 3.7.3 (fallback: pin client 3.7.1); cold-create concurrent upserts may duplicate edges (reported as WARN). **Resume order when the MSK subscription is fixed (user will say so):** recheck `aws kafka list-kafka-versions --region us-east-1`, then 7b -> 8b -> 9c (`TransformerStack -c graphBackend=neptune`, live Boutique -> MSK -> Lambda -> Neptune), and only then Stage 10. Plan and as-built notes: `prompt/stage-09-neptune.md`.
 
 **AWS account constraints discovered (new account on the Free Tier plan, 2026-10-06):** (1) only `free-tier-eligible` instance types can launch — `t3.large` fails, so EKS nodes are `m7i-flex.large`; (2) the account **cannot create load balancers** and **is not subscribed to MSK** (`OperationNotPermitted`) until AWS Support lifts it or the account is upgraded to the paid plan, so the storefront stays private (ClusterIP + port-forward). Anything needing an ALB/NLB (public storefront, API Gateway VPC link, ALB controller) is blocked until then. (3) Under CDK bootstrap the cluster-creator admin is CloudFormation's exec role, so `deploy:workloads` grants the caller cluster-admin via an access entry.
 
