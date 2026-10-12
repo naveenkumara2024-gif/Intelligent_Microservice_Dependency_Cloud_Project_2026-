@@ -8,9 +8,9 @@
 //   npm run verify:neptune -- --limit=500
 //   npm run verify:neptune -- --skip-neo4j
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
-import { aws, awsJson, Check, report } from './aws-cli';
+import { awsJson, Check, report } from './aws-cli';
+import { makeProbeInvoker, ProbeResult } from './probe-client';
 import { neo4jBaseline } from './neo4j-baseline';
 import {
   compareStats,
@@ -108,30 +108,7 @@ if (c) {
 }
 
 // --- 2. Data plane, through the probe ---------------------------------------------------------
-interface ProbeCheck { name: string; ok: boolean; detail: string; informational?: boolean }
-interface ProbeResult { action: string; ok: boolean; checks?: ProbeCheck[]; stats?: GraphStats; detail?: unknown }
-
-function invoke(payload: unknown): { value?: ProbeResult; error?: string } {
-  const file = path.join(os.tmpdir(), `neptune-probe-${process.pid}-${Date.now()}`);
-  fs.writeFileSync(`${file}.in.json`, JSON.stringify(payload));
-  try {
-    const r = aws([
-      'lambda', 'invoke', '--function-name', probeName, '--cli-binary-format', 'raw-in-base64-out',
-      '--cli-read-timeout', '330', '--payload', `fileb://${`${file}.in.json`.replace(/\\/g, '/')}`,
-      `${file}.out.json`,
-    ]);
-    if (!r.ok) return { error: r.stderr };
-    const meta = JSON.parse(r.stdout) as { FunctionError?: string };
-    const body = fs.readFileSync(`${file}.out.json`, 'utf8');
-    if (meta.FunctionError) {
-      const e = JSON.parse(body) as { errorMessage?: string };
-      return { error: `Lambda ${meta.FunctionError}: ${e.errorMessage ?? body.slice(0, 300)}` };
-    }
-    return { value: JSON.parse(body) as ProbeResult };
-  } finally {
-    for (const f of [`${file}.in.json`, `${file}.out.json`]) fs.rmSync(f, { force: true });
-  }
-}
+const invoke = makeProbeInvoker(probeName);
 
 function runProbe(label: string, payload: unknown): ProbeResult | undefined {
   const r = invoke(payload);

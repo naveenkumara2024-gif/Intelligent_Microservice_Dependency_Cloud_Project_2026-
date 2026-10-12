@@ -12,9 +12,22 @@ export interface Call {
 }
 
 // Tried in order. Newer semantic conventions use `server.address`; older ones `net.peer.name`.
-// The exact names Online Boutique emits are unverified until a live capture (Stage 7b/8b).
 const CALLEE_ATTRS = ['peer.service', 'server.address', 'net.peer.name', 'net.sock.peer.name'];
 const URL_ATTRS = ['url.full', 'http.url'];
+
+// What the live Online Boutique (v0.10.7) actually emits, captured in Stage 8b: the callee of a
+// service-to-service gRPC call is NOT a hostname. `server.address` is the callee's bare ClusterIP
+// (e.g. 172.20.11.140), so the callee's identity is the gRPC service in the RPC attributes:
+//   Go services  : rpc.method = "hipstershop.ProductCatalogService/GetProduct"   (no rpc.service)
+//   Python       : rpc.service = "hipstershop.ProductCatalogService", rpc.method = "ListProducts"
+// The deployment/service name is the lower-cased gRPC service name (productcatalogservice), which
+// is a property of Online Boutique, not of gRPC in general; peer.service and a real hostname win
+// when present.
+//
+// Infrastructure RPCs must not become edges: every service's exporter is itself instrumented
+// (opentelemetry.proto.collector.trace.v1.TraceService/Export to the collector) and the kubelet
+// health-checks every pod (grpc.health.v1.Health/Check).
+const INFRA_RPC_PREFIXES = ['grpc.health.', 'grpc.reflection.', 'opentelemetry.proto.'];
 
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
@@ -31,15 +44,33 @@ export function normalizeHost(raw: string): string | undefined {
   return host.toLowerCase();
 }
 
+/** "hipstershop.ProductCatalogService" (or a full method "pkg.Svc/Method") -> the gRPC service, qualified. */
+export function grpcServiceOf(span: ParsedSpan): string | undefined {
+  const service = span.attrs['rpc.service'];
+  if (service) return service.replace(/^\//, '');
+  const method = span.attrs['rpc.method'];
+  if (method && method.includes('/')) return method.replace(/^\//, '').split('/')[0] || undefined;
+  return undefined;
+}
+
+/** "hipstershop.ProductCatalogService" -> "productcatalogservice". */
+function shortServiceName(qualified: string): string | undefined {
+  const last = qualified.split('.').pop()?.trim();
+  return last ? last.toLowerCase() : undefined;
+}
+
 export function calleeOf(span: ParsedSpan): string | undefined {
+  const rpc = grpcServiceOf(span);
+  if (rpc && INFRA_RPC_PREFIXES.some((prefix) => rpc.startsWith(prefix))) return undefined;
+
   for (const key of [...CALLEE_ATTRS, ...URL_ATTRS]) {
     const v = span.attrs[key];
     if (v) {
-      const host = normalizeHost(v);
+      const host = normalizeHost(v); // a bare IP is rejected here
       if (host) return host;
     }
   }
-  return undefined;
+  return rpc ? shortServiceName(rpc) : undefined;
 }
 
 export function deriveCall(span: ParsedSpan): Call | undefined {

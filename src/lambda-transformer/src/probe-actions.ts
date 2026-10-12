@@ -118,6 +118,36 @@ async function dropProbeVertices(g: any): Promise<void> {
   await g.V().has('Service', 'name', TextP.startingWith(PROBE_PREFIX)).drop().iterate();
 }
 
+/** One CALLS edge as the streaming transformer stores it (see writers/gremlin.ts). */
+export interface LiveEdge {
+  um: string;
+  dm: string;
+  call_count: number;
+  latency_sum_ms: number;
+  last_seen_ms: number;
+}
+
+/** Read-only: the edges currently in the graph, busiest first. Used by the live (9c) check. */
+export async function listEdges(g: any, limit = 500): Promise<LiveEdge[]> {
+  const rows = await g.E().hasLabel('CALLS')
+    .order().by('call_count', order.desc)
+    .limit(limit)
+    .project('um', 'dm', 'c', 's', 't')
+    .by(__.outV().values('name'))
+    .by(__.inV().values('name'))
+    .by(__.coalesce(__.values('call_count'), __.constant(0)))
+    .by(__.coalesce(__.values('latency_sum_ms'), __.constant(0)))
+    .by(__.coalesce(__.values('last_seen_ms'), __.constant(0)))
+    .toList();
+  return rows.map((r: any) => ({
+    um: String(field(r, 'um')),
+    dm: String(field(r, 'dm')),
+    call_count: num(field(r, 'c')),
+    latency_sum_ms: num(field(r, 's')),
+    last_seen_ms: num(field(r, 't')),
+  }));
+}
+
 /** Read-only summary used for the parity check; ties in the top 10 are broken by (um, dm) name. */
 export async function graphStats(g: any): Promise<GraphStats> {
   const nodes = num((await g.V().hasLabel('Service').count().next()).value);

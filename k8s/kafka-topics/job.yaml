@@ -9,6 +9,10 @@ spec:
       restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
+        # runAsNonRoot cannot be verified for a NAMED image user (appuser): the kubelet needs a
+        # numeric UID. 1000 is apache/kafka's appuser (checked with `id` in the image).
+        runAsUser: 1000
+        runAsGroup: 1000
       containers:
         - name: kafka-topics
           image: apache/kafka:3.9.0

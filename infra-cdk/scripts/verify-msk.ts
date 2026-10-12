@@ -1,8 +1,7 @@
 // Stage 7b checkpoint: confirms MSK is up, the topics exist, the collector exports to it, and
 // real span messages with several service names are readable from otel.traces.
 // Creates only a short-lived consumer pod (deleted on exit). Exits non-zero on any failure.
-import { spawnSync } from 'node:child_process';
-import { awsJson, Check, kubectl, kubectlArgs, kubectlJson, mskInfo, pinEksContext, report } from './aws-cli';
+import { awsJson, Check, kubectl, kubectlJson, mskInfo, pinEksContext, report } from './aws-cli';
 
 // Same list as verify-eks: the only Online Boutique services instrumented upstream.
 const TRACING_SERVICES = [
@@ -62,14 +61,28 @@ const script = [
   `/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server '${msk.bootstrap}' --consumer.config /tmp/c.properties --topic otel.traces --from-beginning --max-messages 200 --timeout-ms 60000`,
 ].join('\n');
 const podName = `kafka-verify-${Date.now()}`;
-const run = spawnSync(
-  'kubectl',
-  kubectlArgs([
-    'run', podName, '-n', 'observability', '--image=apache/kafka:3.9.0', '--restart=Never',
-    '--rm', '-i', '--quiet', '--command', '--', 'sh', '-c', script,
-  ]),
-  { encoding: 'utf8', timeout: 5 * 60 * 1000, maxBuffer: 64 * 1024 * 1024 },
-);
+// A detached pod plus `kubectl logs`: with `kubectl run -i --rm` anything the container prints
+// before kubectl attaches is lost, which silently dropped the ==TOPICS== marker (found in 7b).
+const created = kubectl([
+  'run', podName, '-n', 'observability', '--image=apache/kafka:3.9.0', '--restart=Never',
+  '--command', '--', 'sh', '-c', script,
+]);
+let phase = '';
+if (created.ok) {
+  const deadline = Date.now() + 5 * 60 * 1000;
+  while (Date.now() < deadline) {
+    phase = kubectl(['get', 'pod', podName, '-n', 'observability', '-o', 'jsonpath={.status.phase}']).stdout.trim();
+    if (phase === 'Succeeded' || phase === 'Failed') break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000);
+  }
+}
+const logs2 = created.ok ? kubectl(['logs', podName, '-n', 'observability']) : { ok: false, stdout: '', stderr: created.stderr };
+if (created.ok) kubectl(['delete', 'pod', podName, '-n', 'observability', '--ignore-not-found', '--wait=false']);
+const run = {
+  status: created.ok && phase === 'Succeeded' ? 0 : 1,
+  stdout: logs2.stdout,
+  stderr: created.ok ? `pod phase ${phase || 'unknown'}: ${logs2.stderr}` : created.stderr,
+};
 const out = run.stdout ?? '';
 const [, afterTopics = ''] = out.split('==TOPICS==');
 const [topicsPart, messagesPart = ''] = afterTopics.split('==MESSAGES==');

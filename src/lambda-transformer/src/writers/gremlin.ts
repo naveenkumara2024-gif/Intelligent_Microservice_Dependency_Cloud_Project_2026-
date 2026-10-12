@@ -34,13 +34,34 @@ export interface GremlinWriterOptions {
   credentials?: CredentialsProvider;
 }
 
+/**
+ * Node >= 22 defines a global WebSocket, and the gremlin driver prefers it over the `ws` package
+ * (`globalThis.WebSocket ?? import('ws')`). It then constructs it with NO options, so custom
+ * headers are silently dropped: under IAM auth Neptune receives an unsigned handshake and answers
+ * 403, which the driver reports only as "non-101 status code". Found in Stage 9b on the Lambda
+ * Node 22 runtime (raw `ws` with the same headers was accepted). Hiding the global makes the driver
+ * fall back to `ws`, which honours `headers`. Nothing else in this process uses the global.
+ */
+export function useNodeWebSocketLibrary(): void {
+  const g = globalThis as { WebSocket?: unknown };
+  if (g.WebSocket !== undefined) g.WebSocket = undefined;
+}
+
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 
-/** True when the socket itself is gone, so the next attempt needs a new (re-signed) connection. */
+/**
+ * True when the connection is unusable and the next attempt needs a NEW one with freshly signed
+ * headers: the socket is gone, or Neptune rejected the opening handshake. A handshake 401/403 means
+ * the SigV4 signature is invalid or expired (they live 5 minutes, and the driver replays the headers
+ * it was constructed with on every reconnect). It is distinct from a query-level authorization
+ * failure, which arrives as a ResponseError on an open connection and is NOT retried.
+ */
 export function isConnectionError(err: unknown): boolean {
-  return /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|not open|connection (is )?closed|WebSocket was closed/i.test(messageOf(err));
+  return /ECONNRESET|ECONNREFUSED|EPIPE|socket hang up|not open|connection (is )?closed|WebSocket was closed|Unexpected server response: 40[13]/i.test(
+    messageOf(err),
+  );
 }
 
 /** True for errors worth retrying: concurrent updates to the same element, a transient timeout, or a lost connection. */
@@ -97,6 +118,8 @@ export function edgeTraversal(g: any, edges: EdgeAgg[]): any {
 export class GremlinWriter implements GraphWriter {
   private connection: any;
   private g: any;
+  /** Set once a request has gone through, so a closed socket is distinguishable from "not opened yet". */
+  private everOpened = false;
 
   constructor(private readonly options: GremlinWriterOptions) {
     // Unauthenticated connections open immediately; IAM ones open on first use (signing is async).
@@ -110,7 +133,14 @@ export class GremlinWriter implements GraphWriter {
 
   /** The traversal source, opening (and signing) the connection first when needed. */
   async connectedSource(): Promise<any> {
+    // The driver reopens a closed socket on its own, but with the headers it was built with: under
+    // SigV4 that replays a stale signature (Stage 9c: bursts of "Unexpected server response: 403").
+    // Drop a connection that has closed since it was last used so the next one is signed afresh.
+    if (this.g && this.options.iamAuth && this.everOpened && this.connection?.isOpen === false) {
+      await this.reset();
+    }
     if (!this.g) {
+      if (this.options.iamAuth) useNodeWebSocketLibrary();
       const headers = this.options.iamAuth
         ? await signGetHeaders({
             url: this.options.url,
@@ -128,6 +158,7 @@ export class GremlinWriter implements GraphWriter {
     const connection = this.connection;
     this.connection = undefined;
     this.g = undefined;
+    this.everOpened = false;
     try {
       await connection?.close();
     } catch {
@@ -141,6 +172,7 @@ export class GremlinWriter implements GraphWriter {
         const g = await this.connectedSource();
         // Each traversal is one request; Neptune applies a request atomically, so a retry cannot double-apply.
         await build(g).iterate();
+        this.everOpened = true;
         return;
       } catch (err) {
         if (attempt >= MAX_ATTEMPTS || !isRetryable(err)) throw err;
