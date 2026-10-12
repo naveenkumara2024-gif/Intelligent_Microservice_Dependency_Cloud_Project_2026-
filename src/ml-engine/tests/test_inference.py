@@ -116,3 +116,59 @@ def test_oversized_snapshot_is_rejected(bundle):
     edge = {"um": "n0", "dm": "n1", "avg_latency_ms": 1, "p95_latency_ms": 2, "call_count": 3, "rpctype": "rpc"}
     with pytest.raises(SnapshotError, match="too large"):
         _call(bundle, {"nodes": nodes, "edges": [edge]})
+
+
+# --- container mode: the SageMaker toolkit only honours ITS OWN exception for the status code -------
+# Verified against sagemaker_inference.transformer: a plain ValueError becomes a 500; only
+# GenericInferenceToolkitError(status_code, message) sets the response status.
+
+class FakeToolkitError(Exception):
+    def __init__(self, status_code, message=None, phrase=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+@pytest.fixture
+def container_mode(monkeypatch):
+    monkeypatch.setattr(inference, "GenericInferenceToolkitError", FakeToolkitError)
+
+
+def _status_of(fn, *args):
+    with pytest.raises(FakeToolkitError) as info:
+        fn(*args)
+    return info.value.status_code, str(info.value.message)
+
+
+def test_container_bad_json_is_400_with_a_useful_message(container_mode):
+    status, message = _status_of(inference.input_fn, "not json", "application/json")
+    assert status == 400 and "valid JSON" in message
+
+
+def test_container_invalid_snapshot_is_400(container_mode, bundle):
+    data = inference.input_fn(json.dumps({"nodes": [], "edges": []}), "application/json")
+    status, message = _status_of(inference.predict_fn, data, bundle)
+    assert status == 400 and "at least one node" in message
+
+
+def test_container_bad_top_k_is_400(container_mode, snapshot):
+    snapshot["top_k"] = 0
+    status, _ = _status_of(inference.input_fn, json.dumps(snapshot), "application/json")
+    assert status == 400
+
+
+def test_container_wrong_content_type_is_415_and_accept_is_406(container_mode):
+    assert _status_of(inference.input_fn, "{}", "text/csv")[0] == 415
+    assert _status_of(inference.output_fn, {"ranking": []}, "text/csv")[0] == 406
+
+
+def test_container_valid_request_is_unaffected(container_mode, bundle, snapshot):
+    out = inference.predict_fn(inference.input_fn(json.dumps(snapshot), "application/json"), bundle)
+    assert len(out["ranking"]) == 3
+
+
+def test_container_server_side_bugs_stay_500s_not_400s(container_mode, bundle, snapshot):
+    bundle.metadata["node_in_dim"] = 99  # model/feature mismatch is OUR bug, not the caller's
+    data = inference.input_fn(json.dumps(snapshot), "application/json")
+    with pytest.raises(RuntimeError, match="does not match the model"):
+        inference.predict_fn(data, bundle)

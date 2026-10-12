@@ -96,6 +96,12 @@ export class SagemakerStack extends cdk.Stack {
       },
     });
 
+    // SageMaker verifies it can read the model data at the moment the Model is created. The Model
+    // only references the role's ARN, so without this CloudFormation creates it in parallel with
+    // the role's DefaultPolicy (the one granting s3:GetObject) and the create fails with "Could not
+    // access model data". Depending on the role construct covers the role AND its policy.
+    model.node.addDependency(role);
+
     // Serverless: no instance type, no idle cost, scales to zero between requests.
     const config = new sagemaker.CfnEndpointConfig(this, 'EndpointConfig', {
       productionVariants: [

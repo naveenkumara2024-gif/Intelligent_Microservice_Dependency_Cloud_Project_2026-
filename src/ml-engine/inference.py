@@ -15,8 +15,12 @@ Response (application/json):
 trained to output (train.py / predict.py). ``ranking`` only lists nodes with at least one incoming
 call, because a service nobody calls cannot be noticed as the root cause.
 
-Bad input raises ValueError (``features.SnapshotError``), which the SageMaker toolkit turns into an
-HTTP 400; anything else is a 500 and a bug.
+Bad input raises ``features.SnapshotError`` (a ValueError). The SageMaker inference toolkit does NOT
+map a plain ValueError to a 4xx: every exception that is not one of its own becomes a 500. So inside
+the container the handlers re-raise it as ``sagemaker_inference.errors.GenericInferenceToolkitError``
+with an explicit status (400 bad snapshot, 415 content type, 406 Accept). Off the container (tests,
+score_local.py) that package is absent and the SnapshotError propagates unchanged. Anything else is a
+bug and stays a 500.
 """
 
 from __future__ import annotations
@@ -29,9 +33,21 @@ import torch
 from features import SnapshotError, build_features
 from model_pure import PureRootCauseGNN
 
+try:  # only present inside the SageMaker inference container
+    from sagemaker_inference.errors import GenericInferenceToolkitError
+except ImportError:  # pragma: no cover - exercised by tests through monkeypatching
+    GenericInferenceToolkitError = None
+
 DEFAULT_TOP_K = 5
 MAX_TOP_K = 50
 CONTENT_TYPE = "application/json"
+
+
+def _as_client_error(error: SnapshotError, status: int = 400) -> Exception:
+    """The exception to raise for a bad request: carries ``status`` in the container, else as-is."""
+    if GenericInferenceToolkitError is not None:
+        return GenericInferenceToolkitError(status, str(error))
+    return error
 
 
 class Bundle:
@@ -50,7 +66,14 @@ def model_fn(model_dir: str) -> Bundle:
 
 def input_fn(request_body, content_type: str = CONTENT_TYPE) -> dict:
     if content_type is None or not content_type.split(";")[0].strip().lower() == CONTENT_TYPE:
-        raise SnapshotError(f"unsupported content type {content_type!r}; send {CONTENT_TYPE}")
+        raise _as_client_error(SnapshotError(f"unsupported content type {content_type!r}; send {CONTENT_TYPE}"), 415)
+    try:
+        return _parse_body(request_body)
+    except SnapshotError as e:
+        raise _as_client_error(e) from e
+
+
+def _parse_body(request_body) -> dict:
     if isinstance(request_body, (bytes, bytearray)):
         try:
             request_body = request_body.decode("utf-8")
@@ -69,7 +92,10 @@ def input_fn(request_body, content_type: str = CONTENT_TYPE) -> dict:
 
 
 def predict_fn(data: dict, bundle: Bundle) -> dict:
-    feats = build_features(data["nodes"], data["edges"])
+    try:
+        feats = build_features(data["nodes"], data["edges"])
+    except SnapshotError as e:
+        raise _as_client_error(e) from e
     expected = bundle.metadata.get("node_in_dim")
     if expected is not None and feats.x.shape[1] != expected:
         raise RuntimeError(f"feature width {feats.x.shape[1]} does not match the model ({expected})")
@@ -92,5 +118,5 @@ def predict_fn(data: dict, bundle: Bundle) -> dict:
 
 def output_fn(prediction: dict, accept: str = CONTENT_TYPE):
     if accept and accept.split(",")[0].split(";")[0].strip().lower() not in (CONTENT_TYPE, "*/*"):
-        raise SnapshotError(f"unsupported Accept {accept!r}; only {CONTENT_TYPE} is produced")
+        raise _as_client_error(SnapshotError(f"unsupported Accept {accept!r}; only {CONTENT_TYPE} is produced"), 406)
     return json.dumps(prediction), CONTENT_TYPE

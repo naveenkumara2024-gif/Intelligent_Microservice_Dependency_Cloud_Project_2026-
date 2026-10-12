@@ -10,6 +10,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { aws, awsJson, Check, report } from './aws-cli';
+import { findPython, NO_PYTHON_MESSAGE } from './python';
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const ML = path.join(ROOT, 'src', 'ml-engine');
@@ -143,9 +144,14 @@ if (response) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-ref-'));
   const file = path.join(dir, 'snapshot.json');
   fs.writeFileSync(file, snapshot);
-  const ref = spawnSync('python', [path.join(ML, 'score_local.py'), '--in', file], { encoding: 'utf8', cwd: ML });
+  const python = findPython();
+  const ref = python
+    ? spawnSync(python.cmd, [...python.args, path.join(ML, 'score_local.py'), '--in', file], { encoding: 'utf8', cwd: ML })
+    : undefined;
   fs.rmSync(dir, { recursive: true, force: true });
-  if (ref.status !== 0) {
+  if (!ref) {
+    add({ name: 'Parity with local reference', ok: false, detail: NO_PYTHON_MESSAGE });
+  } else if (ref.status !== 0) {
     add({ name: 'Parity with local reference', ok: false, detail: `local scorer failed: ${(ref.stderr || ref.error?.message || '').slice(0, 200)}` });
   } else {
     const local = JSON.parse(ref.stdout) as Scores;

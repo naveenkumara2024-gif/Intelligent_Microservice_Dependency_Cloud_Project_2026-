@@ -71,6 +71,23 @@ describe('SagemakerStack model container', () => {
     expect(container.ModelDataUrl).toBeDefined();
   });
 
+  test('the Model is created only AFTER the role AND its policy (S3 read) exist', () => {
+    // Regression: SageMaker checks model-data access at Model creation. The Model references only
+    // the role ARN, so without an explicit dependency CloudFormation raced it against the policy.
+    const [model] = only('AWS::SageMaker::Model');
+    const policyIds = Object.keys(template.findResources('AWS::IAM::Policy'));
+    const roleIds = Object.keys(template.findResources('AWS::IAM::Role'));
+    expect(policyIds).toHaveLength(1);
+    expect(model.DependsOn).toEqual(expect.arrayContaining([...policyIds, ...roleIds]));
+  });
+
+  test('the endpoint is created only after the model (and so after the policy)', () => {
+    const [config] = only('AWS::SageMaker::EndpointConfig');
+    expect(JSON.stringify(config.Properties.ProductionVariants[0].ModelName)).toContain('Model');
+    const [endpoint] = only('AWS::SageMaker::Endpoint');
+    expect(JSON.stringify(endpoint.Properties.EndpointConfigName)).toContain('EndpointConfig');
+  });
+
   test('the image tag is not floating (no :latest)', () => {
     expect(DLC_TAG).not.toMatch(/latest/);
     expect(DLC_TAG).toMatch(/^\d+\.\d+\.\d+-cpu-py\d+-ubuntu[\d.]+-sagemaker$/);

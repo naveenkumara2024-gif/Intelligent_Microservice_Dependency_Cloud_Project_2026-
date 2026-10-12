@@ -244,8 +244,8 @@ validation (`AWS::SageMaker::Endpoint` has no `EndpointName` attribute); fixed t
    random weights over Boutique scenarios, a self-loop / multi-edge / uncalled-node graph and a
    300-node random graph.
 3. Handlers round-trip the contract; 11 invalid-input cases and 4 malformed bodies raise
-   `ValueError` (a 400 under the SageMaker toolkit); the tarball, unpacked as the container would,
-   serves a request.
+   `SnapshotError` (a `ValueError`; **see the 10b correction below: the toolkit does NOT turn that
+   into a 400**); the tarball, unpacked as the container would, serves a request.
 4. Artifact: 110,715 bytes, reproducible bytes, gate `met: true` recorded in `metadata.json`
    (`model_version` d77fda205a82).
 5. 42 pytest; infra 80/80 (68 + 12 new); full `cdk synth` clean; `verify-sagemaker.ts` fails
@@ -259,3 +259,47 @@ validation (`AWS::SageMaker::Endpoint` has no `EndpointName` attribute); fixed t
 - The DLC starts, imports `inference.py` from `code/`, and the toolkit maps `ValueError` to 4xx.
 - Endpoint vs local score parity (<= 1e-4), and cold/warm latency.
 - That the model finds real faults: all labels are synthetic.
+
+---
+
+## Phase 10b run (2026-10-12) — two deploy-time bugs found and fixed
+
+**Run 1 (CREATE_FAILED, rolled back, nothing left behind):** `Could not access model data at s3://...`.
+CloudFormation created the `Model` in parallel with the role's `DefaultPolicy` (the s3:GetObject
+grant) because the Model referenced only the role ARN, and SageMaker checks access at Model creation.
+Fix: `model.node.addDependency(role)` (covers the role and its policy) plus a regression test.
+
+**Run 2 (deployed), `npm run verify:sagemaker`:**
+
+| Check | Result |
+|---|---|
+| Endpoint `InService` | PASS |
+| Serverless config, no instance type | PASS: 2048 MB x 2 |
+| Invocation, cold then warm | PASS: 13.7 s cold, 1.9 s warm (includes AWS CLI start-up) |
+| Injected fault in top 3 | PASS: paymentservice 0.939, checkoutservice 0.057, emailservice 0.001 |
+| Parity with local reference | PASS: 12 scores, max difference 9.9e-10 (tolerance 1e-4) |
+| Malformed request is a 4xx | **FAIL: returned 500** |
+
+**The 500 was a wrong assumption of mine.** I believed the SageMaker inference toolkit maps a
+`ValueError` to HTTP 400. Its source says otherwise: `transform()` re-wraps every exception that is
+not a `BaseInferenceToolkitError` as `GenericInferenceToolkitError(500, ...)`. Only
+`sagemaker_inference.errors.GenericInferenceToolkitError(status_code, message)` controls the status.
+Fix in `inference.py`: inside the container the handlers raise that class with 400 (bad snapshot or
+body or top_k), 415 (content type) or 406 (Accept); off the container the package is absent and the
+`SnapshotError` propagates unchanged (tests, `score_local.py`). Server-side bugs still surface as
+500. Tests inject a fake toolkit error to assert each status, and that a model/feature mismatch is
+not misreported as a client error.
+
+This needs a redeploy (new artifact, same weights and `model_version`).
+
+**Run 3 (redeploy with the fix, `UPDATE_COMPLETE`), `npm run verify:sagemaker`: 6/6 PASS.**
+Endpoint `InService` on the new config; serverless 2048 MB x 2, no instance type; cold 5.8 s / warm
+2.1 s (includes AWS CLI start-up); `paymentservice` #1 at 0.939; endpoint-vs-local parity 9.90e-10;
+and the malformed request now returns `Received client error (400) from model with message "at
+least one node is required ..."`. Note for callers: the toolkit appends a Python traceback (with
+container paths) to the error body; harmless here (IAM-authenticated, internal callers) but the
+future scorer should log it and not forward it to end users.
+
+Remaining for Stage 10: `npm run destroy:sagemaker` (user), then
+`npm run verify:sagemaker -- --after-destroy`. Not proven: that the model finds *real* faults (all
+labels are synthetic), and live `own_delta` derivation (needs Neptune + a baseline tracker).

@@ -24,7 +24,7 @@
     "deploy:neptune": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy NeptuneStack",
     "verify:neptune": "tsx scripts/verify-neptune.ts",
     "destroy:neptune": "cdk destroy NeptuneStack",
-    "build:model": "python ../src/ml-engine/build_artifact.py",
+    "build:model": "tsx scripts/build-model.ts",
     "deploy:sagemaker": "npm run build:model && npm run preflight && cdk deploy SagemakerStack",
     "verify:sagemaker": "tsx scripts/verify-sagemaker.ts",
     "destroy:sagemaker": "cdk destroy SagemakerStack"
