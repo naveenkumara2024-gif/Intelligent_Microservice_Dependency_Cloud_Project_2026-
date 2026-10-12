@@ -54,15 +54,17 @@ describe('VpcStack', () => {
     }
   });
 
-  test('interface endpoints for SageMaker Runtime and SNS with private DNS', () => {
-    for (const service of ['sagemaker.runtime', 'sns']) {
+  test('interface endpoints for SageMaker Runtime, SNS, Lambda and STS with private DNS', () => {
+    // Lambda and STS are what an MSK event source mapping needs from the isolated data subnets
+    // (Stage 8b: "Your event source VPC must be able to connect to Lambda and STS").
+    for (const service of ['sagemaker.runtime', 'sns', 'lambda', 'sts']) {
       template.hasResourceProperties('AWS::EC2::VPCEndpoint', {
         VpcEndpointType: 'Interface',
         PrivateDnsEnabled: true,
         ServiceName: `com.amazonaws.us-east-1.${service}`,
       });
     }
-    template.resourcePropertiesCountIs('AWS::EC2::VPCEndpoint', { VpcEndpointType: 'Interface' }, 2);
+    template.resourcePropertiesCountIs('AWS::EC2::VPCEndpoint', { VpcEndpointType: 'Interface' }, 4);
     template.resourcePropertiesCountIs('AWS::EC2::VPCEndpoint', { VpcEndpointType: 'Gateway' }, 2);
   });
 

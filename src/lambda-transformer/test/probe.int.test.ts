@@ -5,11 +5,13 @@
 // It proves the Gremlin the probe will run on Neptune is valid and behaves as intended. It cannot
 // prove Neptune-specific behaviour (IAM auth, concurrent-modification handling): TinkerGraph is
 // neither authenticated nor transactional, so the concurrency totals are NOT asserted here.
+import { aggregate } from '../src/aggregate';
 import { GremlinWriter } from '../src/writers/gremlin';
 import {
   clearGraph,
   concurrencyTest,
   graphStats,
+  listEdges,
   LoadEdge,
   LoadNode,
   loadGraph,
@@ -141,5 +143,30 @@ describe('self-tests of the production writer', () => {
 
   test('the probe prefix is reserved for self-tests', () => {
     expect(PROBE_PREFIX).toBe('__probe_');
+  });
+});
+
+describe('listEdges (the live Stage 9c check)', () => {
+  const calls = (n: number, caller: string, callee: string, ms: number) =>
+    Array.from({ length: n }, () => ({ caller, callee, latencyMs: ms, endMs: 1_700_000_000_000 }));
+
+  test('returns the streaming-contract edges, busiest first, with their counters', async () => {
+    await writer.write(
+      aggregate([...calls(3, 'frontend', 'cartservice', 4), ...calls(7, 'frontend', 'productcatalogservice', 10)]),
+    );
+    const edges = await listEdges(g);
+    expect(edges.map((e) => `${e.um}>${e.dm}:${e.call_count}`)).toEqual([
+      'frontend>productcatalogservice:7',
+      'frontend>cartservice:3',
+    ]);
+    expect(edges[0].latency_sum_ms).toBeCloseTo(70, 3);
+    expect(edges[0].last_seen_ms).toBe(1_700_000_000_000);
+  });
+
+  test('honours the limit and reports an empty graph as an empty list', async () => {
+    expect(await listEdges(g)).toEqual([]);
+    await writer.write(aggregate([...calls(1, 'a', 'b', 1), ...calls(2, 'a', 'c', 1), ...calls(3, 'a', 'd', 1)]));
+    const top = await listEdges(g, 2);
+    expect(top.map((e) => e.dm)).toEqual(['d', 'c']);
   });
 });

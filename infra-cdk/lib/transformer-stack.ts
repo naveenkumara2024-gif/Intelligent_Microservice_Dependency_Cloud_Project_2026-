@@ -82,10 +82,14 @@ export class TransformerStack extends cdk.Stack {
     });
 
     if (props.neptune) {
-      // Upserts read before they write (coalesce), so both actions are needed. No delete.
+      // Upserts read before they write (coalesce), and OVERWRITING a property value (the counters,
+      // last_seen_ms, latency_recent_avg_ms) is authorized by Neptune as a delete of the old value
+      // plus a write of the new one, so DeleteDataViaQuery is required too. Found in Stage 9c: the
+      // first live write failed with "not authorized to perform: neptune-db:DeleteDataViaQuery".
+      // The action is coarse (it cannot be limited to property overwrites); scope is this cluster only.
       this.function.addToRolePolicy(
         new iam.PolicyStatement({
-          actions: ['neptune-db:ReadDataViaQuery', 'neptune-db:WriteDataViaQuery'],
+          actions: ['neptune-db:ReadDataViaQuery', 'neptune-db:WriteDataViaQuery', 'neptune-db:DeleteDataViaQuery'],
           resources: [neptuneDbArn(this, props.neptune.resourceId)],
         }),
       );
@@ -93,6 +97,13 @@ export class TransformerStack extends cdk.Stack {
 
     // MSK trigger. The cluster allows unauthenticated TLS clients, so no secret is configured. Parallelism is
     // bounded by the topic's 3 partitions (reserved concurrency is avoided: new accounts keep a low quota).
+    //
+    // No retryAttempts / maxRecordAge: for MSK, Lambda only offers those in "provisioned mode" (dedicated,
+    // separately billed pollers) and rejects the mapping otherwise ("MaximumRetryAttempts is only available
+    // for provisioned mode", found when this stack first deployed). On-demand mode retries a failing batch
+    // until it succeeds or the record leaves the topic (24 h retention). That is the right behaviour for the
+    // failure we expect (Neptune briefly unavailable), and a poison record cannot wedge a partition because
+    // the handler skips malformed records and spans instead of throwing.
     this.function.addEventSource(
       new sources.ManagedKafkaEventSource({
         clusterArn: props.mskClusterArn,
@@ -100,9 +111,6 @@ export class TransformerStack extends cdk.Stack {
         startingPosition: lambda.StartingPosition.LATEST,
         batchSize: 100,
         maxBatchingWindow: cdk.Duration.seconds(5),
-        // Bound retries so one poison batch cannot be retried forever.
-        retryAttempts: 3,
-        maxRecordAge: cdk.Duration.hours(1),
       }),
     );
 

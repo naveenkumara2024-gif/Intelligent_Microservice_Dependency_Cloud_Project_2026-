@@ -3,7 +3,9 @@
 // Stage 9). Read-only. Exits non-zero on any failure.
 import { awsJson, Check, report } from './aws-cli';
 
-const WINDOW_MINUTES = 15;
+// `--window=N` narrows the look-back, e.g. right after a redeploy so earlier failures are not counted.
+const windowArg = process.argv.find((a) => a.startsWith('--window='));
+const WINDOW_MINUTES = windowArg ? Number(windowArg.split('=')[1]) || 15 : 15;
 
 function stackOutputs(stack: string): Record<string, string> {
   const r = awsJson<{ Stacks: { Outputs?: { OutputKey: string; OutputValue: string }[] }[] }>([
@@ -22,7 +24,11 @@ if (!functionName || !logGroup) {
 
 const checks: Check[] = [];
 
-const fn = awsJson<{ State?: string; Runtime?: string }>(['lambda', 'get-function-configuration', '--function-name', functionName]);
+const fn = awsJson<{ State?: string; Runtime?: string; Environment?: { Variables?: Record<string, string> } }>([
+  'lambda', 'get-function-configuration', '--function-name', functionName,
+]);
+// The log backend prints each derived edge; the Neptune backend writes them to the graph instead.
+const backend = fn.value?.Environment?.Variables?.GRAPH_BACKEND ?? 'log';
 checks.push({
   name: 'Lambda function',
   ok: fn.value?.State === 'Active',
@@ -40,6 +46,20 @@ checks.push({
 });
 
 const since = String(Date.now() - WINDOW_MINUTES * 60 * 1000);
+
+/**
+ * Lambda's Node runtime prefixes console.log lines with `<timestamp>	<request id>	INFO	`, so the
+ * message is not itself JSON (found in Stage 8b: the checkpoint saw 0 summaries among 400+ real ones).
+ */
+function jsonOf(message: string): Record<string, unknown> | undefined {
+  const start = message.indexOf('{');
+  if (start < 0) return undefined;
+  try {
+    return JSON.parse(message.slice(start).trim()) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
 function events(pattern: string): string[] {
   const r = awsJson<{ events: { message: string }[] }>([
     'logs', 'filter-log-events', '--log-group-name', logGroup, '--start-time', since, '--filter-pattern', pattern,
@@ -48,13 +68,7 @@ function events(pattern: string): string[] {
 }
 
 const summaries = events('"transformer"')
-  .map((m) => {
-    try {
-      return (JSON.parse(m) as { transformer?: Record<string, number> }).transformer;
-    } catch {
-      return undefined;
-    }
-  })
+  .map((m) => jsonOf(m)?.transformer as Record<string, number> | undefined)
   .filter((s): s is Record<string, number> => !!s);
 const total = (key: string) => summaries.reduce((n, s) => n + (s[key] ?? 0), 0);
 checks.push({
@@ -65,19 +79,23 @@ checks.push({
 
 const edgeNames = new Set(
   events('"edge"').flatMap((m) => {
-    try {
-      const e = (JSON.parse(m) as { edge?: string }).edge;
-      return e ? [e] : [];
-    } catch {
-      return [];
-    }
+    const e = jsonOf(m)?.edge;
+    return typeof e === 'string' ? [e] : [];
   }),
 );
-checks.push({
-  name: 'Edges derived from live spans',
-  ok: edgeNames.size >= 3,
-  detail: edgeNames.size ? [...edgeNames].sort().slice(0, 8).join(' | ') : '(none)',
-});
+checks.push(
+  backend === 'log'
+    ? {
+        name: 'Edges derived from live spans',
+        ok: edgeNames.size >= 3,
+        detail: edgeNames.size ? [...edgeNames].sort().slice(0, 8).join(' | ') : '(none)',
+      }
+    : {
+        name: 'Edges derived from live spans',
+        ok: true,
+        detail: `GRAPH_BACKEND=${backend}: edges are written to Neptune, not logged. Run npm run verify:live to read them back.`,
+      },
+);
 
 const errors = events('?ERROR ?"Task timed out" ?errorMessage');
 checks.push({

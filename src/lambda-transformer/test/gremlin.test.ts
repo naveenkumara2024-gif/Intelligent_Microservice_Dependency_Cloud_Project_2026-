@@ -63,15 +63,27 @@ describe('isRetryable', () => {
     'read ECONNRESET',
   ])('retries %p', (msg) => expect(isRetryable(new Error(msg))).toBe(true));
 
-  test.each(['MalformedQueryException', 'Authentication failed', 'Unexpected server response: 403'])(
-    'does not retry %p',
-    (msg) => expect(isRetryable(new Error(msg))).toBe(false),
+  test.each([
+    'MalformedQueryException',
+    'Authentication failed',
+    // a query-level authorization failure on an OPEN connection: retrying cannot help
+    'Server error: User: arn:aws:sts::1:assumed-role/r/f is not authorized to perform: neptune-db:DeleteDataViaQuery (403)',
+  ])('does not retry %p', (msg) => expect(isRetryable(new Error(msg))).toBe(false));
+
+  // a rejected opening handshake means a stale/invalid signature: re-sign on a new connection
+  test.each(['Unexpected server response: 403', 'Unexpected server response: 401'])('retries %p', (msg) =>
+    expect(isRetryable(new Error(msg))).toBe(true),
   );
 });
 
 describe('isConnectionError', () => {
   test.each(['read ECONNRESET', 'connect ECONNREFUSED 10.0.0.1:8182', 'write EPIPE', 'socket hang up', 'WebSocket is not open'])(
     'a lost socket (%p) needs a new, re-signed connection',
+    (msg) => expect(isConnectionError(new Error(msg))).toBe(true),
+  );
+
+  test.each(['Unexpected server response: 403', 'Unexpected server response: 401'])(
+    'a rejected handshake (%p) needs a new, re-signed connection',
     (msg) => expect(isConnectionError(new Error(msg))).toBe(true),
   );
 

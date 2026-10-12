@@ -42,19 +42,22 @@ describe('TransformerStack', () => {
     expect(subnets).not.toContain('privatedata');
   });
 
-  test('MSK trigger on otel.traces: LATEST, batches of 100 within 5 s, bounded retries, no secret', () => {
+  test('MSK trigger on otel.traces: LATEST, batches of 100 within 5 s, no secret', () => {
     template.resourceCountIs('AWS::Lambda::EventSourceMapping', 1);
     template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
       Topics: ['otel.traces'],
       StartingPosition: 'LATEST',
       BatchSize: 100,
       MaximumBatchingWindowInSeconds: 5,
-      MaximumRetryAttempts: 3,
-      MaximumRecordAgeInSeconds: 3600,
     });
     const mapping = Object.values(template.findResources('AWS::Lambda::EventSourceMapping'))[0];
     // Enabled is a CloudFormation default and is omitted from the template; it must not be false.
     expect(mapping.Properties.Enabled).not.toBe(false);
+    // Regression: Lambda rejects MaximumRetryAttempts / MaximumRecordAgeInSeconds on an MSK mapping
+    // unless provisioned mode is enabled ("only available for provisioned mode").
+    expect(mapping.Properties.MaximumRetryAttempts).toBeUndefined();
+    expect(mapping.Properties.MaximumRecordAgeInSeconds).toBeUndefined();
+    expect(mapping.Properties.ProvisionedPollerConfig).toBeUndefined();
     // The cluster allows unauthenticated TLS clients, so no Secrets Manager access is configured.
     expect(mapping.Properties.SourceAccessConfigurations).toBeUndefined();
   });
@@ -124,13 +127,20 @@ describe('TransformerStack with graphBackend=neptune', () => {
     expect(JSON.stringify(vars.GREMLIN_URL)).toContain('/gremlin');
   });
 
-  test('may read and write the graph, scoped to the cluster, and may NOT delete or administer it', () => {
+  test('may read, write and overwrite (DeleteDataViaQuery) on this cluster only, and nothing administrative', () => {
     const statements = Object.values(t2.findResources('AWS::IAM::Policy')).flatMap(
       (p: any) => p.Properties.PolicyDocument.Statement,
     );
     const neptune = statements.filter((s: any) => [].concat(s.Action).some((a: string) => a.startsWith('neptune-db:')));
     expect(neptune).toHaveLength(1);
-    expect(neptune[0].Action).toEqual(['neptune-db:ReadDataViaQuery', 'neptune-db:WriteDataViaQuery']);
+    // Overwriting a property is a delete+write to Neptune's authorizer (Stage 9c, found live).
+    expect(neptune[0].Action).toEqual([
+      'neptune-db:ReadDataViaQuery',
+      'neptune-db:WriteDataViaQuery',
+      'neptune-db:DeleteDataViaQuery',
+    ]);
+    // ...but never engine administration (status is the probe's, resets and loaders are nobody's)
+    expect(JSON.stringify(neptune[0].Action)).not.toMatch(/GetEngineStatus|ExecuteFastReset|StartLoaderJob|ManageStatistics/);
     expect(JSON.stringify(neptune[0].Resource)).not.toBe('"*"');
   });
 

@@ -24,6 +24,8 @@
     "deploy:neptune": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy NeptuneStack",
     "verify:neptune": "tsx scripts/verify-neptune.ts",
     "destroy:neptune": "cdk destroy NeptuneStack",
+    "verify:live": "tsx scripts/verify-live-graph.ts",
+    "probe": "tsx scripts/probe.ts",
     "build:model": "tsx scripts/build-model.ts",
     "deploy:sagemaker": "npm run build:model && npm run preflight && cdk deploy SagemakerStack",
     "verify:sagemaker": "tsx scripts/verify-sagemaker.ts",

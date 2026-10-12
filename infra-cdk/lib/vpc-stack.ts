@@ -79,6 +79,18 @@ export class VpcStack extends cdk.Stack {
       service: ec2.InterfaceVpcEndpointAwsService.SNS,
       ...interfaceEndpointProps,
     });
+    // The MSK event source mapping's pollers run in the CLUSTER's VPC, whose private-data subnets have
+    // no internet route by design. Lambda reports "Connection error. Your event source VPC must be
+    // able to connect to Lambda and STS" until these exist (found in Stage 8b on the first live
+    // deploy). PrivateLink keeps the data tier isolated instead of giving it a NAT route.
+    this.vpc.addInterfaceEndpoint('LambdaEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.LAMBDA,
+      ...interfaceEndpointProps,
+    });
+    this.vpc.addInterfaceEndpoint('StsEndpoint', {
+      service: ec2.InterfaceVpcEndpointAwsService.STS,
+      ...interfaceEndpointProps,
+    });
 
     // Rejected traffic only: cheap, and shows what the isolated tier blocks.
     this.vpc.addFlowLog('RejectFlowLog', {

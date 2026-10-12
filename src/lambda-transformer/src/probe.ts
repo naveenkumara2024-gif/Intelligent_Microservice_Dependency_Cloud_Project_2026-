@@ -3,12 +3,15 @@
 // with it. Invoked by infra-cdk/scripts/verify-neptune.ts, one action per invocation.
 import https from 'node:https';
 import gremlin from 'gremlin';
+import WebSocket from 'ws';
 import {
   Check,
   clearGraph,
   concurrencyTest,
   graphStats,
   GraphStats,
+  LiveEdge,
+  listEdges,
   LoadEdge,
   LoadNode,
   loadGraph,
@@ -23,10 +26,12 @@ const { traversal } = gremlin.process.AnonymousTraversalSource;
 export type ProbeEvent =
   | { action: 'status' }
   | { action: 'unsigned' }
+  | { action: 'wsdiag' }
   | { action: 'smoke' }
   | { action: 'concurrency'; writers?: number }
   | { action: 'load'; nodes?: LoadNode[]; edges?: LoadEdge[] }
   | { action: 'stats' }
+  | { action: 'edges'; limit?: number }
   | { action: 'clear' };
 
 export interface ProbeResult {
@@ -34,6 +39,7 @@ export interface ProbeResult {
   ok: boolean;
   checks?: Check[];
   stats?: GraphStats;
+  edges?: LiveEdge[];
   detail?: unknown;
 }
 
@@ -152,6 +158,63 @@ async function unsigned(config: Config): Promise<ProbeResult> {
   return { action: 'unsigned', ok: checks.every((c) => c.ok), checks };
 }
 
+/**
+ * Raw WebSocket handshakes against Neptune, to see the HTTP status the Gremlin driver hides behind
+ * "non-101 status code". Variants separate "signature wrong" from "something else wrong".
+ */
+async function wsDiag(config: Config): Promise<ProbeResult> {
+  const credentials = await credentialsFromEnv();
+  const signed = await signGetHeaders({ url: config.gremlinUrl, region: config.region, credentials });
+
+  const attempt = (label: string, headers: Record<string, string>, url = config.gremlinUrl) =>
+    new Promise<Check>((resolve) => {
+      let done = false;
+      const finish = (c: Check) => {
+        if (!done) {
+          done = true;
+          resolve(c);
+        }
+      };
+      const ws = new WebSocket(url, { headers, handshakeTimeout: 10_000 });
+      ws.on('open', () => {
+        finish({ name: label, ok: true, detail: 'handshake accepted (101)' });
+        ws.close();
+      });
+      ws.on('unexpected-response', (_req: unknown, res: any) => {
+        let body = '';
+        res.on('data', (chunk: Buffer) => (body += chunk.toString()));
+        res.on('end', () =>
+          finish({
+            name: label,
+            ok: false,
+            detail: `HTTP ${res.statusCode} ${res.statusMessage ?? ''}; response date=${res.headers.date}; body=${body.slice(0, 300)}`,
+          }),
+        );
+      });
+      ws.on('error', (e: Error) => finish({ name: label, ok: false, detail: `error: ${e.message}` }));
+      setTimeout(() => finish({ name: label, ok: false, detail: 'timed out after 15 s' }), 15_000);
+    });
+
+  const noHost = { ...signed };
+  delete noHost.host;
+  const checks: Check[] = [
+    await attempt('signed, as GremlinWriter sends it', signed),
+    await attempt('signed, no explicit host header', noHost),
+    await attempt('unsigned', {}),
+  ];
+  checks.push({
+    name: 'local clock',
+    ok: true,
+    detail: `${new Date().toUTCString()} (compare with the response date above; SigV4 allows 5 min skew)`,
+  });
+  checks.push({
+    name: 'request headers sent (values redacted)',
+    ok: true,
+    detail: Object.keys(signed).join(', ') + ` | authorization starts: ${signed.authorization?.slice(0, 60)}...`,
+  });
+  return { action: 'wsdiag', ok: checks.filter((c) => c.name !== 'local clock').every((c) => c.ok), checks };
+}
+
 export async function handler(event: ProbeEvent): Promise<ProbeResult> {
   const config = readConfig();
   switch (event.action) {
@@ -159,10 +222,13 @@ export async function handler(event: ProbeEvent): Promise<ProbeResult> {
       return status(config);
     case 'unsigned':
       return unsigned(config);
+    case 'wsdiag':
+      return wsDiag(config);
     case 'smoke':
     case 'concurrency':
     case 'load':
     case 'stats':
+    case 'edges':
     case 'clear': {
       const writer = await signedWriter(config);
       try {
@@ -179,6 +245,10 @@ export async function handler(event: ProbeEvent): Promise<ProbeResult> {
         if (event.action === 'load') {
           const { nodes, edges } = validateLoad(event);
           return { action: 'load', ok: true, detail: await loadGraph(g, nodes, edges) };
+        }
+        if (event.action === 'edges') {
+          const limit = Math.min(Math.max(Math.trunc(Number(event.limit ?? 500)) || 500, 1), 2000);
+          return { action: 'edges', ok: true, edges: await listEdges(g, limit) };
         }
         if (event.action === 'stats') {
           return { action: 'stats', ok: true, stats: await graphStats(g) };

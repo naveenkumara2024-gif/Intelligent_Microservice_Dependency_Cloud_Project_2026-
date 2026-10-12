@@ -3,7 +3,7 @@
 // re-opened with a FRESH signature (a signature is only valid at the WebSocket handshake).
 import { aggregate } from '../src/aggregate';
 
-const connections: Array<{ url: string; options: any; closed: boolean }> = [];
+const connections: Array<{ url: string; options: any; closed: boolean; open: boolean }> = [];
 let iterate: jest.Mock;
 
 jest.mock('gremlin', () => {
@@ -16,10 +16,13 @@ jest.mock('gremlin', () => {
   return {
     driver: {
       DriverRemoteConnection: class {
-        record: { url: string; options: any; closed: boolean };
+        record: { url: string; options: any; closed: boolean; open: boolean };
         constructor(url: string, options: any) {
-          this.record = { url, options, closed: false };
+          this.record = { url, options, closed: false, open: true };
           connections.push(this.record);
+        }
+        get isOpen() {
+          return this.record.open;
         }
         async close() {
           this.record.closed = true;
@@ -99,11 +102,48 @@ describe('GremlinWriter connection handling', () => {
     expect(connections).toHaveLength(1);
   });
 
-  test('an authentication failure is not retried', async () => {
+  test('a query-level authorization failure is NOT retried (retrying cannot grant a permission)', async () => {
+    iterate.mockRejectedValue(
+      new Error('Server error: User: arn:aws:sts::1:assumed-role/r/f is not authorized to perform: neptune-db:DeleteDataViaQuery (403)'),
+    );
+    const w = new GremlinWriter({ url: URL, iamAuth: true, credentials });
+    await expect(w.write(batch)).rejects.toThrow(/not authorized/);
+    expect(iterate).toHaveBeenCalledTimes(1);
+  });
+
+  test('a rejected handshake (stale signature) reconnects with FRESHLY signed headers and succeeds', async () => {
+    iterate.mockRejectedValueOnce(new Error('Unexpected server response: 403')).mockResolvedValue(undefined);
+    const w = new GremlinWriter({ url: URL, iamAuth: true, credentials });
+    await expect(w.write(batch)).resolves.toEqual({ nodes: 2, edges: 1 });
+    expect(connections).toHaveLength(2);
+    expect(connections[0].closed).toBe(true);
+    for (const c of connections) expect(c.options.headers.authorization).toMatch(/AWS4-HMAC-SHA256/);
+  });
+
+  test('a handshake that keeps being rejected gives up after the bounded attempts', async () => {
     iterate.mockRejectedValue(new Error('Unexpected server response: 403'));
     const w = new GremlinWriter({ url: URL, iamAuth: true, credentials });
     await expect(w.write(batch)).rejects.toThrow(/403/);
-    expect(iterate).toHaveBeenCalledTimes(1);
+    expect(iterate).toHaveBeenCalledTimes(4); // MAX_ATTEMPTS
+  });
+
+  test('a connection that closed since its last use is re-signed BEFORE the next request', async () => {
+    const w = new GremlinWriter({ url: URL, iamAuth: true, credentials });
+    await w.write(batch);
+    expect(connections).toHaveLength(1);
+    connections[0].open = false; // idle timeout, or the server closed it between invocations
+    await w.write(batch);
+    expect(connections).toHaveLength(2);
+    expect(connections[0].closed).toBe(true);
+    expect(iterate).toHaveBeenCalledTimes(4); // 2 requests per write (nodes, edges), no failures
+  });
+
+  test('an open connection is reused (no needless re-signing)', async () => {
+    const w = new GremlinWriter({ url: URL, iamAuth: true, credentials });
+    await w.write(batch);
+    await w.write(batch);
+    await w.write(batch);
+    expect(connections).toHaveLength(1);
   });
 
   test('close() closes the connection and a later write opens a new one', async () => {

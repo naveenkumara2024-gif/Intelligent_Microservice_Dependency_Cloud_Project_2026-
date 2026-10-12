@@ -46,7 +46,10 @@ describe('calleeOf', () => {
 
   test('is undefined when no usable attribute exists', () => {
     expect(calleeOf(span({ attrs: {} }))).toBeUndefined();
-    expect(calleeOf(span({ attrs: { 'rpc.service': 'hipstershop.CartService' } }))).toBeUndefined();
+    // Stage 8b: this used to be asserted undefined. Live Boutique (Python services) sends exactly
+    // rpc.service + a bare rpc.method, and that IS the callee; see boutique-live.test.ts.
+    expect(calleeOf(span({ attrs: { 'rpc.method': 'GetCart' } }))).toBeUndefined();
+    expect(calleeOf(span({ attrs: { 'rpc.system': 'grpc' } }))).toBeUndefined();
   });
 });
 
@@ -70,5 +73,47 @@ describe('deriveCall', () => {
 
   test('lower-cases the caller so casing differences do not split a node', () => {
     expect(deriveCall(span({ service: 'FrontEnd' }))?.caller).toBe('frontend');
+  });
+});
+
+describe('calleeOf: gRPC-aware derivation (Stage 8b, from live Boutique spans)', () => {
+  const grpc = (attrs: Record<string, string>) => span({ attrs });
+
+  test('an IP in server.address falls through to the gRPC service', () => {
+    expect(calleeOf(grpc({ 'server.address': '172.20.11.140', 'rpc.method': 'hipstershop.CartService/GetCart' }))).toBe(
+      'cartservice',
+    );
+  });
+
+  test('rpc.service wins over a bare method name', () => {
+    expect(calleeOf(grpc({ 'rpc.service': 'hipstershop.AdService', 'rpc.method': 'GetAds' }))).toBe('adservice');
+  });
+
+  test('a real hostname still wins over the RPC (more specific than the convention)', () => {
+    expect(calleeOf(grpc({ 'server.address': 'legacy-billing', 'rpc.method': 'hipstershop.CartService/GetCart' }))).toBe(
+      'legacy-billing',
+    );
+  });
+
+  test('peer.service wins over everything', () => {
+    expect(
+      calleeOf(grpc({ 'peer.service': 'ledger', 'server.address': 'x', 'rpc.method': 'hipstershop.CartService/GetCart' })),
+    ).toBe('ledger');
+  });
+
+  test.each([
+    ['grpc.health.v1.Health/Check'],
+    ['opentelemetry.proto.collector.trace.v1.TraceService/Export'],
+    ['grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo'],
+  ])('infrastructure RPC %p is never a dependency, even with a hostname address', (method) => {
+    expect(calleeOf(grpc({ 'rpc.method': method, 'server.address': 'otel-collector.observability.svc' }))).toBeUndefined();
+  });
+
+  test('infrastructure RPC is detected from rpc.service too (the Python shape)', () => {
+    expect(calleeOf(grpc({ 'rpc.service': 'grpc.health.v1.Health', 'rpc.method': 'Check' }))).toBeUndefined();
+  });
+
+  test('a bare method name with no service and no address yields nothing, not a guess', () => {
+    expect(calleeOf(grpc({ 'rpc.method': 'ListProducts' }))).toBeUndefined();
   });
 });
