@@ -1,0 +1,91 @@
+import * as cdk from 'aws-cdk-lib';
+import { Match, Template } from 'aws-cdk-lib/assertions';
+import { MskStack } from '../lib/msk-stack';
+import { TransformerStack } from '../lib/transformer-stack';
+import { VpcStack } from '../lib/vpc-stack';
+
+const env = { region: 'us-east-1' };
+const app = new cdk.App();
+const vpcStack = new VpcStack(app, 'TestVpcStack', { env });
+const mskStack = new MskStack(app, 'TestMskStack', { env, vpc: vpcStack.vpc });
+const stack = new TransformerStack(app, 'TestTransformerStack', {
+  env,
+  vpc: vpcStack.vpc,
+  mskClusterArn: mskStack.cluster.attrArn,
+});
+const template = Template.fromStack(stack);
+
+const functionResource = () => Object.values(template.findResources('AWS::Lambda::Function'))[0];
+
+describe('TransformerStack', () => {
+  test('Node 22 function with the bundle entry point, sized for small batches', () => {
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      Runtime: 'nodejs22.x',
+      Handler: 'index.handler',
+      MemorySize: 256,
+      Timeout: 60,
+    });
+  });
+
+  test('logs to the console until Neptune exists (GRAPH_BACKEND=log), with no database URL', () => {
+    const vars = functionResource().Properties.Environment.Variables;
+    expect(vars).toEqual({ GRAPH_BACKEND: 'log' });
+  });
+
+  test('runs in the two private-app subnets, never in public or private-data', () => {
+    const vpcConfig = functionResource().Properties.VpcConfig;
+    expect(vpcConfig.SubnetIds).toHaveLength(2);
+    const subnets = JSON.stringify(vpcConfig.SubnetIds);
+    expect(subnets).toContain('privateapp');
+    expect(subnets).not.toContain('public');
+    expect(subnets).not.toContain('privatedata');
+  });
+
+  test('MSK trigger on otel.traces: LATEST, batches of 100 within 5 s, bounded retries, no secret', () => {
+    template.resourceCountIs('AWS::Lambda::EventSourceMapping', 1);
+    template.hasResourceProperties('AWS::Lambda::EventSourceMapping', {
+      Topics: ['otel.traces'],
+      StartingPosition: 'LATEST',
+      BatchSize: 100,
+      MaximumBatchingWindowInSeconds: 5,
+      MaximumRetryAttempts: 3,
+      MaximumRecordAgeInSeconds: 3600,
+    });
+    const mapping = Object.values(template.findResources('AWS::Lambda::EventSourceMapping'))[0];
+    // Enabled is a CloudFormation default and is omitted from the template; it must not be false.
+    expect(mapping.Properties.Enabled).not.toBe(false);
+    // The cluster allows unauthenticated TLS clients, so no Secrets Manager access is configured.
+    expect(mapping.Properties.SourceAccessConfigurations).toBeUndefined();
+  });
+
+  test('MSK permissions are scoped to the cluster, not "*"', () => {
+    const policies = Object.values(template.findResources('AWS::IAM::Policy'));
+    const statements = policies.flatMap((p: any) => p.Properties.PolicyDocument.Statement);
+    const kafka = statements.filter((s: any) => [].concat(s.Action).some((a: string) => a.startsWith('kafka:')));
+    expect(kafka.length).toBeGreaterThan(0);
+    for (const s of kafka) {
+      expect(JSON.stringify(s.Resource)).not.toBe('"*"');
+    }
+  });
+
+  test('VPC networking access comes from the AWS-managed execution policy', () => {
+    template.hasResourceProperties('AWS::IAM::Role', {
+      ManagedPolicyArns: Match.arrayWith([
+        Match.objectLike({ 'Fn::Join': Match.arrayWith([Match.arrayWith([Match.stringLikeRegexp('AWSLambdaVPCAccessExecutionRole')])]) }),
+      ]),
+    });
+  });
+
+  test('log group keeps one week of logs', () => {
+    template.hasResourceProperties('AWS::Logs::LogGroup', { RetentionInDays: 7 });
+  });
+
+  test('no reserved concurrency (a new account keeps a low concurrency quota)', () => {
+    expect(functionResource().Properties.ReservedConcurrentExecutions).toBeUndefined();
+  });
+
+  test('exports the function and log group names for the verify script', () => {
+    template.hasOutput('FunctionName', {});
+    template.hasOutput('LogGroupName', {});
+  });
+});

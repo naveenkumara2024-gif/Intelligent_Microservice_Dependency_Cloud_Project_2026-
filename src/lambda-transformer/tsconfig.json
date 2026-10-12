@@ -1,16 +1,18 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
-    "declaration": true,
+    "types": ["node", "jest"],
+    "declaration": false,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "dist",
+    "noEmit": true,
     "rootDir": "."
   },
+  "include": ["src", "test"],
   "exclude": ["node_modules", "dist"]
 }

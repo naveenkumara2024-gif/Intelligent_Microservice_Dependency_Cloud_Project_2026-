@@ -7,6 +7,7 @@ import { NeptuneStack } from '../lib/neptune-stack';
 import { DynamodbStack } from '../lib/dynamodb-stack';
 import { SagemakerStack } from '../lib/sagemaker-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { TransformerStack } from '../lib/transformer-stack';
 
 // Region is pinned (CLAUDE.md: us-east-1). The account comes from the CDK CLI
 // (CDK_DEFAULT_ACCOUNT, resolved from credentials); it is undefined when
@@ -22,6 +23,11 @@ const neptuneStack = new NeptuneStack(app, 'NeptuneStack', { env });
 const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });
 const sagemakerStack = new SagemakerStack(app, 'SagemakerStack', { env });
 const frontendStack = new FrontendStack(app, 'FrontendStack', { env });
+const transformerStack = new TransformerStack(app, 'TransformerStack', {
+  env,
+  vpc: vpcStack.vpc,
+  mskClusterArn: mskStack.cluster.attrArn,
+});
 
 // Dependency order per CLAUDE.md "Working conventions": VPC first, then
 // anything needing the VPC (EKS/MSK/Neptune), then SageMaker last (needs a
@@ -30,3 +36,4 @@ eksStack.addStackDependency(vpcStack);
 mskStack.addStackDependency(vpcStack);
 neptuneStack.addStackDependency(vpcStack);
 sagemakerStack.addStackDependency(dynamodbStack);
+transformerStack.addStackDependency(mskStack);
