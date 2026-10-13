@@ -55,6 +55,9 @@ export class DynamodbStack extends cdk.Stack {
       tableName: INCIDENTS_TABLE,
       partitionKey: { name: INCIDENT_KEY, type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: TTL_ATTR,
+      // Stage 12: the alert dispatcher reads this stream. Old AND new image, because "resolved" is
+      // the OPEN -> RESOLVED transition and only the pair proves it. Streams cost nothing to hold.
+      stream: dynamodb.StreamViewType.NEW_AND_OLD_IMAGES,
     });
     // Newest first within a status ("open incidents", "recent resolved") or within one root cause.
     this.incidentsTable.addGlobalSecondaryIndex({
@@ -78,6 +81,7 @@ export class DynamodbStack extends cdk.Stack {
 
     new cdk.CfnOutput(this, 'IncidentsTableName', { value: this.incidentsTable.tableName });
     new cdk.CfnOutput(this, 'StateTableName', { value: this.stateTable.tableName });
+    new cdk.CfnOutput(this, 'IncidentsStreamArn', { value: this.incidentsTable.tableStreamArn! });
     new cdk.CfnOutput(this, 'TableKeyArn', { value: this.key.keyArn });
   }
 }

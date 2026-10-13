@@ -36,7 +36,10 @@
     "destroy:dynamodb": "cdk destroy DynamodbStack",
     "deploy:scorer": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy ScorerStack",
     "verify:incidents": "tsx scripts/verify-incidents.ts",
-    "destroy:scorer": "cdk destroy ScorerStack"
+    "destroy:scorer": "cdk destroy ScorerStack",
+    "deploy:alerts": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy AlertingStack",
+    "verify:alerts": "tsx scripts/verify-alerts.ts",
+    "destroy:alerts": "cdk destroy AlertingStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",
