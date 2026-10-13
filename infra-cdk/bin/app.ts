@@ -9,6 +9,7 @@ import { SagemakerStack } from '../lib/sagemaker-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 import { TransformerStack } from '../lib/transformer-stack';
 import { ScorerStack } from '../lib/scorer-stack';
+import { AlertingStack } from '../lib/alerting-stack';
 
 // Region is pinned (CLAUDE.md: us-east-1). The account comes from the CDK CLI
 // (CDK_DEFAULT_ACCOUNT, resolved from credentials); it is undefined when
@@ -57,6 +58,16 @@ const scorerStack = new ScorerStack(app, 'ScorerStack', {
   tableKey: dynamodbStack.key,
 });
 
+// Stage 12: incident alerts. Needs only the incidents table's stream, so it deploys and verifies
+// without EKS/MSK/Neptune/SageMaker. `-c alertEmail=<addr>` adds an SNS email subscription (the
+// recipient confirms it once); `-c dashboardUrl=<url>` adds a link to messages (until Stage 13).
+const alertingStack = new AlertingStack(app, 'AlertingStack', {
+  env,
+  incidentsTable: dynamodbStack.incidentsTable,
+  alertEmail: app.node.tryGetContext('alertEmail') ? String(app.node.tryGetContext('alertEmail')) : undefined,
+  dashboardUrl: app.node.tryGetContext('dashboardUrl') ? String(app.node.tryGetContext('dashboardUrl')) : undefined,
+});
+
 // Dependency order per CLAUDE.md "Working conventions": VPC first, then
 // anything needing the VPC (EKS/MSK/Neptune), then SageMaker last (needs a
 // trained model artifact to actually deploy). SagemakerStack references nothing in
@@ -72,3 +83,4 @@ if (graphBackend === 'neptune') {
 }
 scorerStack.addStackDependency(neptuneStack);
 scorerStack.addStackDependency(dynamodbStack);
+alertingStack.addStackDependency(dynamodbStack);

@@ -1,0 +1,187 @@
+{
+  "slack_opened": {
+    "text": "Incident opened: productcatalogservice (confidence 99.4%, severity critical)",
+    "blocks": [
+      {
+        "type": "header",
+        "text": {
+          "type": "plain_text",
+          "emoji": true,
+          "text": ":rotating_light: Incident opened: productcatalogservice"
+        }
+      },
+      {
+        "type": "section",
+        "fields": [
+          {
+            "type": "mrkdwn",
+            "text": "*Root cause*\n`productcatalogservice`"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Confidence*\n99.4%"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Severity*\ncritical"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Opened*\n2026-10-13T12:00:00.000Z"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Blast radius*\ncheckoutservice"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*At risk (callers)*\nfrontend, recommendationservice, checkoutservice"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": "*Evidence (this window vs baseline)*\n• `productcatalogservice`: 8.4 ms vs 1.0 ms baseline (+720%, 120 calls)\n• `checkoutservice`: 5.1 ms vs 2.1 ms baseline (+140%, 60 calls)"
+        }
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": "*Model ranking*\n1. `productcatalogservice` 99.4%  ·  2. `frontend` 0.4%  ·  3. `checkoutservice` 0.2%"
+        }
+      },
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "incident `1791892800000-productcatalogservice`  ·  model rca-gat-small-2026-10-12"
+          }
+        ]
+      }
+    ]
+  },
+  "slack_resolved": {
+    "text": "Incident resolved: productcatalogservice after 8m 00s",
+    "blocks": [
+      {
+        "type": "header",
+        "text": {
+          "type": "plain_text",
+          "emoji": true,
+          "text": ":white_check_mark: Incident resolved: productcatalogservice"
+        }
+      },
+      {
+        "type": "section",
+        "fields": [
+          {
+            "type": "mrkdwn",
+            "text": "*Root cause*\n`productcatalogservice`"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Duration*\n8m 00s"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Peak confidence*\n99.7%"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Severity*\ncritical"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Opened*\n2026-10-13T12:00:00.000Z"
+          },
+          {
+            "type": "mrkdwn",
+            "text": "*Resolved*\n2026-10-13T12:08:00.000Z"
+          }
+        ]
+      },
+      {
+        "type": "section",
+        "text": {
+          "type": "mrkdwn",
+          "text": "*Evidence (this window vs baseline)*\n• `productcatalogservice`: 8.4 ms vs 1.0 ms baseline (+720%, 120 calls)\n• `checkoutservice`: 5.1 ms vs 2.1 ms baseline (+140%, 60 calls)"
+        }
+      },
+      {
+        "type": "context",
+        "elements": [
+          {
+            "type": "mrkdwn",
+            "text": "incident `1791892800000-productcatalogservice`  ·  model rca-gat-small-2026-10-12"
+          }
+        ]
+      }
+    ]
+  },
+  "pagerduty_trigger": {
+    "routing_key": "ROUTING-KEY",
+    "event_action": "trigger",
+    "dedup_key": "1791892800000-productcatalogservice",
+    "payload": {
+      "summary": "Root cause productcatalogservice (confidence 99.4%); blast radius 1 service: checkoutservice",
+      "source": "rca-framework",
+      "severity": "critical",
+      "timestamp": "2026-10-13T12:00:00.000Z",
+      "component": "productcatalogservice",
+      "group": "microservices",
+      "class": "latency-degradation",
+      "custom_details": {
+        "incident_id": "1791892800000-productcatalogservice",
+        "score": 0.994,
+        "peak_score": 0.994,
+        "blast_radius": [
+          "checkoutservice"
+        ],
+        "at_risk": [
+          "frontend",
+          "recommendationservice",
+          "checkoutservice"
+        ],
+        "top_candidates": [
+          {
+            "name": "productcatalogservice",
+            "score": 0.994
+          },
+          {
+            "name": "frontend",
+            "score": 0.004
+          },
+          {
+            "name": "checkoutservice",
+            "score": 0.002
+          }
+        ],
+        "evidence": {
+          "productcatalogservice": {
+            "own_delta": 7.2,
+            "window_avg_ms": 8.4,
+            "baseline_ms": 1.025,
+            "calls": 120
+          },
+          "checkoutservice": {
+            "own_delta": 1.4,
+            "window_avg_ms": 5.1,
+            "baseline_ms": 2.125,
+            "calls": 60
+          }
+        },
+        "windows": 2,
+        "model_version": "rca-gat-small-2026-10-12"
+      }
+    }
+  },
+  "pagerduty_resolve": {
+    "routing_key": "ROUTING-KEY",
+    "event_action": "resolve",
+    "dedup_key": "1791892800000-productcatalogservice"
+  }
+}

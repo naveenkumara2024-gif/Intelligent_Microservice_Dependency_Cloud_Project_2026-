@@ -56,6 +56,13 @@ describe('DynamodbStack', () => {
     expect(defs.find((d) => d.AttributeName === 'opened_at_ms')?.AttributeType).toBe('N');
   });
 
+  test('incidents: a stream with both images (Stage 12 alerts on the OPEN -> RESOLVED pair)', () => {
+    expect(table(INCIDENTS_TABLE).Properties.StreamSpecification).toEqual({ StreamViewType: 'NEW_AND_OLD_IMAGES' });
+    // The state table is never streamed: it is rewritten every minute and nobody consumes it.
+    expect(table(STATE_TABLE).Properties.StreamSpecification).toBeUndefined();
+    template.hasOutput('IncidentsStreamArn', {});
+  });
+
   test('state: single-item table keyed by pk, no TTL (it must never expire under the scorer)', () => {
     const props = table(STATE_TABLE).Properties;
     expect(props.KeySchema).toEqual([{ AttributeName: STATE_KEY, KeyType: 'HASH' }]);
