@@ -1,17 +1,18 @@
 {
   "name": "lambda-transformer",
   "version": "1.0.0",
-  "description": "Stages 8-12: MSK spans -> Gremlin graph upserts (AWS Lambda), the Neptune verification probe, the incident scorer, and the incident alert Lambdas",
+  "description": "Stages 8-13: MSK spans -> Gremlin graph upserts (AWS Lambda), the Neptune verification probe, the incident scorer, the incident alert Lambdas, and the dashboard API",
   "main": "dist/index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:integration": "jest --config jest.int.config.js --runInBand",
-    "build": "npm run build:handler && npm run build:probe && npm run build:scorer && npm run build:alerts",
+    "build": "npm run build:handler && npm run build:probe && npm run build:scorer && npm run build:alerts && npm run build:api",
     "build:handler": "esbuild src/handler.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --external:bufferutil --external:utf-8-validate",
     "build:probe": "esbuild src/probe.ts --bundle --platform=node --target=node22 --outfile=dist/probe.js --external:bufferutil --external:utf-8-validate",
     "build:scorer": "esbuild src/scorer/handler.ts --bundle --platform=node --target=node22 --outfile=dist/scorer.js --external:bufferutil --external:utf-8-validate",
-    "build:alerts": "esbuild src/alerts/handler.ts --bundle --platform=node --target=node22 --outfile=dist/alerts.js --external:bufferutil --external:utf-8-validate"
+    "build:alerts": "esbuild src/alerts/handler.ts --bundle --platform=node --target=node22 --outfile=dist/alerts.js --external:bufferutil --external:utf-8-validate",
+    "build:api": "esbuild src/api/handler.ts --bundle --platform=node --target=node22 --outfile=dist/api.js --external:bufferutil --external:utf-8-validate"
   },
   "keywords": [],
   "author": "",

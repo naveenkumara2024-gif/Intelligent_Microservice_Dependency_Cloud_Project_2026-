@@ -39,7 +39,10 @@
     "destroy:scorer": "cdk destroy ScorerStack",
     "deploy:alerts": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy AlertingStack",
     "verify:alerts": "tsx scripts/verify-alerts.ts",
-    "destroy:alerts": "cdk destroy AlertingStack"
+    "destroy:alerts": "cdk destroy AlertingStack",
+    "deploy:frontend": "npm --prefix ../src/lambda-transformer run build && npm --prefix ../src/web-dashboard run build && npm run preflight && cdk deploy FrontendStack",
+    "verify:dashboard": "tsx scripts/verify-dashboard.ts",
+    "destroy:frontend": "cdk destroy FrontendStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",

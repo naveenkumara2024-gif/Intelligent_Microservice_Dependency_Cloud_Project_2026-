@@ -1,0 +1,95 @@
+{
+  "incidents": [
+    {
+      "incident_id": "1791892800000-productcatalogservice",
+      "status": "OPEN",
+      "root_cause": "productcatalogservice",
+      "severity": "critical",
+      "score": 0.994,
+      "peak_score": 0.994,
+      "blast_radius": [
+        "checkoutservice"
+      ],
+      "at_risk": [
+        "frontend",
+        "recommendationservice",
+        "checkoutservice"
+      ],
+      "top_candidates": [
+        {
+          "name": "productcatalogservice",
+          "score": 0.994
+        },
+        {
+          "name": "frontend",
+          "score": 0.004
+        },
+        {
+          "name": "checkoutservice",
+          "score": 0.002
+        }
+      ],
+      "evidence": {
+        "productcatalogservice": {
+          "own_delta": 7.2,
+          "window_avg_ms": 8.4,
+          "baseline_ms": 1.025,
+          "calls": 120
+        },
+        "checkoutservice": {
+          "own_delta": 1.4,
+          "window_avg_ms": 5.1,
+          "baseline_ms": 2.125,
+          "calls": 60
+        }
+      },
+      "opened_at_ms": 1791892800000,
+      "last_seen_ms": 1791892860000,
+      "resolved_at_ms": null,
+      "windows": 2,
+      "model_version": "rca-gat-small-2026-10-12"
+    },
+    {
+      "incident_id": "1791889200000-currencyservice",
+      "status": "RESOLVED",
+      "root_cause": "currencyservice",
+      "severity": "error",
+      "score": 0.994,
+      "peak_score": 0.997,
+      "blast_radius": [],
+      "at_risk": [
+        "frontend",
+        "recommendationservice",
+        "checkoutservice"
+      ],
+      "top_candidates": [
+        {
+          "name": "productcatalogservice",
+          "score": 0.994
+        },
+        {
+          "name": "frontend",
+          "score": 0.004
+        },
+        {
+          "name": "checkoutservice",
+          "score": 0.002
+        }
+      ],
+      "evidence": {
+        "productcatalogservice": {
+          "own_delta": 7.2,
+          "window_avg_ms": 8.4,
+          "baseline_ms": 1.025,
+          "calls": 120
+        }
+      },
+      "opened_at_ms": 1791889200000,
+      "last_seen_ms": 1791892860000,
+      "resolved_at_ms": 1791893280000,
+      "windows": 9,
+      "model_version": "rca-gat-small-2026-10-12"
+    }
+  ],
+  "count": 2
+}

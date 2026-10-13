@@ -29,7 +29,6 @@ const neptuneStack = new NeptuneStack(app, 'NeptuneStack', {
 });
 const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });
 const sagemakerStack = new SagemakerStack(app, 'SagemakerStack', { env });
-const frontendStack = new FrontendStack(app, 'FrontendStack', { env });
 // `-c graphBackend=neptune` points the transformer at Neptune (IAM auth); the default logs the
 // upserts, so Stage 8b can be deployed and verified without Neptune (and its cost).
 const graphBackend = String(app.node.tryGetContext('graphBackend') ?? 'log');
@@ -58,6 +57,21 @@ const scorerStack = new ScorerStack(app, 'ScorerStack', {
   tableKey: dynamodbStack.key,
 });
 
+// Stage 13: the dashboard and its read-only API. `-c topology=neptune` adds the in-VPC topology
+// Lambda (and the VPC/Neptune dependency); the default serves incidents from DynamoDB alone and
+// answers /api/topology with 503, so the dashboard can be deployed and verified cheaply first.
+const topologyBackend = String(app.node.tryGetContext('topology') ?? 'none');
+if (topologyBackend !== 'none' && topologyBackend !== 'neptune') {
+  throw new Error(`Unknown topology "${topologyBackend}" (expected "none" or "neptune")`);
+}
+const frontendStack = new FrontendStack(app, 'FrontendStack', {
+  env,
+  incidentsTable: dynamodbStack.incidentsTable,
+  stateTable: dynamodbStack.stateTable,
+  tableKey: dynamodbStack.key,
+  topology: topologyBackend === 'neptune' ? { vpc: vpcStack.vpc, neptune: neptuneTarget } : undefined,
+});
+
 // Stage 12: incident alerts. Needs only the incidents table's stream, so it deploys and verifies
 // without EKS/MSK/Neptune/SageMaker. `-c alertEmail=<addr>` adds an SNS email subscription (the
 // recipient confirms it once); `-c dashboardUrl=<url>` adds a link to messages (until Stage 13).
@@ -84,3 +98,8 @@ if (graphBackend === 'neptune') {
 scorerStack.addStackDependency(neptuneStack);
 scorerStack.addStackDependency(dynamodbStack);
 alertingStack.addStackDependency(dynamodbStack);
+frontendStack.addStackDependency(dynamodbStack);
+if (topologyBackend === 'neptune') {
+  frontendStack.addStackDependency(vpcStack);
+  frontendStack.addStackDependency(neptuneStack);
+}
