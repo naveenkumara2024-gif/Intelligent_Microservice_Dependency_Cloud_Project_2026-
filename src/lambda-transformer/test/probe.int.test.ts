@@ -10,6 +10,7 @@ import { GremlinWriter } from '../src/writers/gremlin';
 import {
   clearGraph,
   concurrencyTest,
+  degradeService,
   graphStats,
   listEdges,
   LoadEdge,
@@ -168,5 +169,38 @@ describe('listEdges (the live Stage 9c check)', () => {
     await writer.write(aggregate([...calls(1, 'a', 'b', 1), ...calls(2, 'a', 'c', 1), ...calls(3, 'a', 'd', 1)]));
     const top = await listEdges(g, 2);
     expect(top.map((e) => e.dm)).toEqual(['d', 'c']);
+  });
+});
+
+describe('degradeService (Stage 11 live proof)', () => {
+  beforeEach(async () => {
+    await clearGraph(g);
+  });
+
+  test('adds synthetic calls to every edge into the service, through the production counters', async () => {
+    const call = (caller: string, callee: string, latencyMs: number) => ({ caller, callee, latencyMs, endMs: 1_700_000_000_000 });
+    await writer.write(aggregate([
+      ...Array.from({ length: 10 }, () => call('fe', 'pay', 10)),
+      ...Array.from({ length: 10 }, () => call('co', 'pay', 10)),
+      ...Array.from({ length: 10 }, () => call('fe', 'other', 10)),
+    ]));
+
+    const result = await degradeService(writer, g, { service: 'pay', calls: 100, latencyMs: 60 }, 1_700_000_100_000);
+    expect(result.callers.sort()).toEqual(['co', 'fe']);
+    expect(result.calls).toBe(200);
+
+    const edges = await listEdges(g);
+    const fePay = edges.find((e) => e.um === 'fe' && e.dm === 'pay')!;
+    expect(fePay.call_count).toBe(110);
+    expect(fePay.latency_sum_ms).toBeCloseTo(10 * 10 + 100 * 60, 6);
+    expect(fePay.last_seen_ms).toBe(1_700_000_100_000);
+    // an edge into another service is untouched
+    expect(edges.find((e) => e.dm === 'other')!.call_count).toBe(10);
+  });
+
+  test('refuses a service nobody calls (nothing to degrade) and an unknown one', async () => {
+    await writer.write(aggregate([{ caller: 'fe', callee: 'pay', latencyMs: 10, endMs: 1 }]));
+    await expect(degradeService(writer, g, { service: 'fe', calls: 5, latencyMs: 50 })).rejects.toThrow(/no incoming/);
+    await expect(degradeService(writer, g, { service: 'ghost', calls: 5, latencyMs: 50 })).rejects.toThrow(/no incoming/);
   });
 });

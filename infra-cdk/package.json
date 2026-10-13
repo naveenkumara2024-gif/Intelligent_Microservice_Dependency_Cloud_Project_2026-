@@ -26,10 +26,17 @@
     "destroy:neptune": "cdk destroy NeptuneStack",
     "verify:live": "tsx scripts/verify-live-graph.ts",
     "probe": "tsx scripts/probe.ts",
+    "expose:storefront": "tsx scripts/expose-storefront.ts",
     "build:model": "tsx scripts/build-model.ts",
     "deploy:sagemaker": "npm run build:model && npm run preflight && cdk deploy SagemakerStack",
     "verify:sagemaker": "tsx scripts/verify-sagemaker.ts",
-    "destroy:sagemaker": "cdk destroy SagemakerStack"
+    "destroy:sagemaker": "cdk destroy SagemakerStack",
+    "deploy:dynamodb": "npm run preflight && cdk deploy DynamodbStack",
+    "verify:dynamodb": "tsx scripts/verify-dynamodb.ts",
+    "destroy:dynamodb": "cdk destroy DynamodbStack",
+    "deploy:scorer": "npm --prefix ../src/lambda-transformer run build && npm run preflight && cdk deploy ScorerStack",
+    "verify:incidents": "tsx scripts/verify-incidents.ts",
+    "destroy:scorer": "cdk destroy ScorerStack"
   },
   "devDependencies": {
     "@swc/core": "^1.15.0",

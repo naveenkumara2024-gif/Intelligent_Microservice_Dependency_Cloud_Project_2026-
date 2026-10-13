@@ -1,4 +1,4 @@
-import { handler, readConfig, validateLoad } from '../src/probe';
+import { handler, readConfig, validateDegrade, validateLoad } from '../src/probe';
 
 describe('readConfig', () => {
   test('derives the HTTPS status URL from the Gremlin URL', () => {
@@ -42,5 +42,26 @@ describe('handler', () => {
   test('rejects an unknown action', async () => {
     process.env.GREMLIN_URL = 'wss://n.example:8182/gremlin';
     await expect(handler({ action: 'drop-everything' } as any)).rejects.toThrow(/Unknown probe action/);
+  });
+});
+
+describe('validateDegrade', () => {
+  test('accepts a bounded request and defaults the call count', () => {
+    expect(validateDegrade({ service: 'paymentservice', calls: 100, latencyMs: 60 })).toEqual({ service: 'paymentservice', calls: 100, latencyMs: 60 });
+    expect(validateDegrade({ service: 'paymentservice', latencyMs: 12.5 })).toEqual({ service: 'paymentservice', calls: 200, latencyMs: 12.5 });
+  });
+
+  test.each([
+    ['no service', { latencyMs: 10 }],
+    ['empty service', { service: '', latencyMs: 10 }],
+    ['no latency', { service: 'a' }],
+    ['zero latency', { service: 'a', latencyMs: 0 }],
+    ['absurd latency', { service: 'a', latencyMs: 1e9 }],
+    ['NaN latency', { service: 'a', latencyMs: NaN }],
+    ['too many calls', { service: 'a', calls: 1e6, latencyMs: 10 }],
+    ['fractional calls', { service: 'a', calls: 2.5, latencyMs: 10 }],
+    ['zero calls', { service: 'a', calls: 0, latencyMs: 10 }],
+  ])('rejects %s', (_label, payload) => {
+    expect(() => validateDegrade(payload as any)).toThrow();
   });
 });

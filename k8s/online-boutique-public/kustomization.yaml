@@ -1,0 +1,29 @@
+# Overlay on k8s/online-boutique that makes the storefront reachable from the internet.
+# The base keeps it private (ClusterIP); this is the explicit opt-in:
+#   npm run expose:storefront            (apply)   npm run expose:storefront -- --off   (undo)
+#
+# An internet-facing Network Load Balancer, plain HTTP on port 80, open to everyone unless
+# `--allow=<cidr>` is given. Online Boutique has no authentication and is a demo app: it
+# accepts fake card numbers at checkout and stores nothing sensitive, but treat it as public.
+#
+# `npm run destroy:eks` (scripts/pre-destroy.ts) deletes any LoadBalancer Service first, so this
+# load balancer cannot be orphaned and block VPC deletion. If you destroy with `cdk destroy`
+# directly, run `npx tsx scripts/pre-destroy.ts` (or `npm run expose:storefront -- --off`) first.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../online-boutique
+patches:
+  - target:
+      kind: Service
+      name: frontend-external
+    patch: |-
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: frontend-external
+        annotations:
+          # The in-tree AWS cloud provider honours this and creates an NLB (not a Classic LB).
+          service.beta.kubernetes.io/aws-load-balancer-type: nlb
+      spec:
+        type: LoadBalancer

@@ -8,6 +8,7 @@ import { DynamodbStack } from '../lib/dynamodb-stack';
 import { SagemakerStack } from '../lib/sagemaker-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 import { TransformerStack } from '../lib/transformer-stack';
+import { ScorerStack } from '../lib/scorer-stack';
 
 // Region is pinned (CLAUDE.md: us-east-1). The account comes from the CDK CLI
 // (CDK_DEFAULT_ACCOUNT, resolved from credentials); it is undefined when
@@ -34,25 +35,34 @@ const graphBackend = String(app.node.tryGetContext('graphBackend') ?? 'log');
 if (graphBackend !== 'log' && graphBackend !== 'neptune') {
   throw new Error(`Unknown graphBackend "${graphBackend}" (expected "log" or "neptune")`);
 }
+const neptuneTarget = {
+  endpoint: neptuneStack.cluster.attrEndpoint,
+  port: neptuneStack.cluster.attrPort,
+  resourceId: neptuneStack.cluster.attrClusterResourceId,
+};
 const transformerStack = new TransformerStack(app, 'TransformerStack', {
   env,
   vpc: vpcStack.vpc,
   mskClusterArn: mskStack.cluster.attrArn,
-  neptune:
-    graphBackend === 'neptune'
-      ? {
-          endpoint: neptuneStack.cluster.attrEndpoint,
-          port: neptuneStack.cluster.attrPort,
-          resourceId: neptuneStack.cluster.attrClusterResourceId,
-        }
-      : undefined,
+  neptune: graphBackend === 'neptune' ? neptuneTarget : undefined,
+});
+// Stage 11: reads the graph (Neptune), asks the SageMaker endpoint by its constant name, and
+// persists to DynamoDB. It always targets Neptune: there is nothing to score without the graph.
+const scorerStack = new ScorerStack(app, 'ScorerStack', {
+  env,
+  vpc: vpcStack.vpc,
+  neptune: neptuneTarget,
+  incidentsTable: dynamodbStack.incidentsTable,
+  stateTable: dynamodbStack.stateTable,
+  tableKey: dynamodbStack.key,
 });
 
 // Dependency order per CLAUDE.md "Working conventions": VPC first, then
 // anything needing the VPC (EKS/MSK/Neptune), then SageMaker last (needs a
 // trained model artifact to actually deploy). SagemakerStack references nothing in
 // DynamodbStack (the endpoint is self-contained), so it declares no dependency on it;
-// the Stage 11 scorer Lambda is what will tie them together.
+// ScorerStack (Stage 11) is what ties them together: it depends on VPC, Neptune and DynamoDB
+// through its props, and on the SageMaker endpoint only at run time, by name.
 eksStack.addStackDependency(vpcStack);
 mskStack.addStackDependency(vpcStack);
 neptuneStack.addStackDependency(vpcStack);
@@ -60,3 +70,5 @@ transformerStack.addStackDependency(mskStack);
 if (graphBackend === 'neptune') {
   transformerStack.addStackDependency(neptuneStack);
 }
+scorerStack.addStackDependency(neptuneStack);
+scorerStack.addStackDependency(dynamodbStack);
