@@ -8,6 +8,10 @@ import {
   Check,
   clearGraph,
   concurrencyTest,
+  DEGRADE_MAX_CALLS,
+  DEGRADE_MAX_LATENCY_MS,
+  degradeService,
+  DegradeSpec,
   graphStats,
   GraphStats,
   LiveEdge,
@@ -32,6 +36,7 @@ export type ProbeEvent =
   | { action: 'load'; nodes?: LoadNode[]; edges?: LoadEdge[] }
   | { action: 'stats' }
   | { action: 'edges'; limit?: number }
+  | ({ action: 'degrade' } & Partial<DegradeSpec>)
   | { action: 'clear' };
 
 export interface ProbeResult {
@@ -80,6 +85,21 @@ export function validateLoad(event: { nodes?: unknown; edges?: unknown }): { nod
     }
   }
   return { nodes, edges };
+}
+
+/** Validates a synthetic slow-down request: bounded, and only for a named service. */
+export function validateDegrade(event: Partial<DegradeSpec>): DegradeSpec {
+  const { service, calls, latencyMs } = event;
+  if (typeof service !== 'string' || !service) throw new Error('degrade needs a service name');
+  const n = Number(calls ?? 200);
+  if (!Number.isInteger(n) || n < 1 || n > DEGRADE_MAX_CALLS) {
+    throw new Error(`degrade calls must be an integer in [1, ${DEGRADE_MAX_CALLS}], got ${JSON.stringify(calls)}`);
+  }
+  const ms = Number(latencyMs);
+  if (!Number.isFinite(ms) || ms <= 0 || ms > DEGRADE_MAX_LATENCY_MS) {
+    throw new Error(`degrade latencyMs must be in (0, ${DEGRADE_MAX_LATENCY_MS}], got ${JSON.stringify(latencyMs)}`);
+  }
+  return { service, calls: n, latencyMs: ms };
 }
 
 function httpsGet(url: string, headers: Record<string, string>): Promise<{ status: number; body: string }> {
@@ -229,6 +249,7 @@ export async function handler(event: ProbeEvent): Promise<ProbeResult> {
     case 'load':
     case 'stats':
     case 'edges':
+    case 'degrade':
     case 'clear': {
       const writer = await signedWriter(config);
       try {
@@ -245,6 +266,10 @@ export async function handler(event: ProbeEvent): Promise<ProbeResult> {
         if (event.action === 'load') {
           const { nodes, edges } = validateLoad(event);
           return { action: 'load', ok: true, detail: await loadGraph(g, nodes, edges) };
+        }
+        if (event.action === 'degrade') {
+          const spec = validateDegrade(event);
+          return { action: 'degrade', ok: true, detail: { ...spec, ...(await degradeService(writer, g, spec)) } };
         }
         if (event.action === 'edges') {
           const limit = Math.min(Math.max(Math.trunc(Number(event.limit ?? 500)) || 500, 1), 2000);

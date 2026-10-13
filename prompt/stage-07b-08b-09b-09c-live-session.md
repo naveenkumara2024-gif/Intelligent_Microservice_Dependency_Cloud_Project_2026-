@@ -116,3 +116,29 @@ Teardown order is the reverse of dependency: transformer, Neptune, MSK, EKS, the
 - Behaviour over days (Kafka redelivery double-counting is still an accepted, documented
   approximation).
 - Real failures: fault injection in the live cluster is Stage 14.
+
+---
+
+## Addendum (2026-10-13): the load-balancer block did NOT lift
+
+The upgrade cleared MSK and Neptune, but an attempt to make the storefront public (an internet-facing
+NLB via `type: LoadBalancer`) was refused by AWS, on the paid plan:
+
+> `OperationNotPermitted: This AWS account currently does not support creating load balancers. For more
+> information, please contact AWS Support.`
+
+So the Free Tier errors were two different mechanisms: MSK/Neptune were plan gates (cleared by the
+upgrade); load balancers are a separate new-account restriction that needs an AWS Support case. The
+mechanism for going public is built, tested and left in place for when it clears:
+
+- `k8s/online-boutique-public/` (kustomize overlay: only `frontend-external` becomes an NLB; the base
+  stays private, and a test asserts it),
+- `npm run expose:storefront [-- --allow=<cidr>[,<cidr>]] [-- --off]`,
+- `scripts/pre-destroy.ts` already deletes LoadBalancer Services before teardown.
+
+Nothing was left behind: the attempt was reverted with `--off`, and `describe-load-balancers` showed none.
+Still unblocked-by-support: Stage 13's API Gateway VPC link (needs an ELB) and any public ingress.
+
+Ways to a public URL that do not need an ELB, none built yet, each a decision for the account owner:
+a Cloudflare quick tunnel run in-cluster (third party, ephemeral URL), or API Gateway HTTP API with a
+Cloud Map private integration (registers node IPs and a NodePort; more moving parts).

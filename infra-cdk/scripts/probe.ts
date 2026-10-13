@@ -2,12 +2,13 @@
 //   npm run probe -- status
 //   npm run probe -- wsdiag
 //   npm run probe -- edges '{"limit":20}'      (optional JSON merged into the payload)
+//   npm run probe -- degrade '{"service":"paymentservice","calls":200,"latencyMs":70}'
 import { awsJson } from './aws-cli';
 import { makeProbeInvoker } from './probe-client';
 
 const [action, extra] = process.argv.slice(2);
 if (!action) {
-  console.error('usage: npm run probe -- <status|unsigned|wsdiag|smoke|concurrency|stats|edges|clear> [json]');
+  console.error('usage: npm run probe -- <status|unsigned|wsdiag|smoke|concurrency|stats|edges|degrade|clear> [json]');
   process.exit(2);
 }
 const stack = awsJson<{ Stacks: { Outputs?: { OutputKey: string; OutputValue: string }[] }[] }>([

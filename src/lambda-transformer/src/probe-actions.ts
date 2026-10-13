@@ -148,6 +148,35 @@ export async function listEdges(g: any, limit = 500): Promise<LiveEdge[]> {
   }));
 }
 
+/** Synthetic slow-down request (Stage 11 live proof; real fault injection is Stage 14). */
+export interface DegradeSpec {
+  service: string;
+  /** Synthetic calls added to EACH edge into the service. */
+  calls: number;
+  /** Latency of each synthetic call. */
+  latencyMs: number;
+}
+
+export const DEGRADE_MAX_CALLS = 2000;
+export const DEGRADE_MAX_LATENCY_MS = 60_000;
+
+/**
+ * Makes a service look slower by adding synthetic calls to every edge INTO it, through the same
+ * writer (and so the same counters, histogram and vertex totals) the streaming transformer uses.
+ * The scorer then sees a window whose average latency into that service is pulled toward
+ * `latencyMs`. Counters only grow, so there is no undo: the synthetic calls stay in the lifetime
+ * totals until the graph is cleared. Throws if the service has no incoming edge to degrade.
+ */
+export async function degradeService(writer: GraphWriter, g: any, spec: DegradeSpec, nowMs = Date.now()): Promise<{ callers: string[]; calls: number }> {
+  const callers: string[] = (await g.V().has('Service', 'name', spec.service).inE('CALLS').outV().values('name').dedup().toList()).map(String);
+  if (callers.length === 0) throw new Error(`service "${spec.service}" has no incoming CALLS edge to degrade`);
+  const synthetic = callers.flatMap((caller) =>
+    Array.from({ length: spec.calls }, () => ({ caller, callee: spec.service, latencyMs: spec.latencyMs, endMs: nowMs })),
+  );
+  await writer.write(aggregate(synthetic));
+  return { callers, calls: synthetic.length };
+}
+
 /** Read-only summary used for the parity check; ties in the top 10 are broken by (um, dm) name. */
 export async function graphStats(g: any): Promise<GraphStats> {
   const nodes = num((await g.V().hasLabel('Service').count().next()).value);
