@@ -31,30 +31,31 @@ Online Boutique on EKS -> OTel Collector -> MSK (Kafka) -> Lambda transformer ->
 | 10 | SageMaker serverless GNN endpoint | Verified live |
 | 11 | DynamoDB incidents + scorer Lambda | Verified live |
 | 12 | SNS alerting (Slack / PagerDuty / email) | Verified live; merged to `main` |
-| 13a | Dashboard (React + Cytoscape) + read-only API + `FrontendStack` | Built and tested locally |
+| 13a | Dashboard (React + Cytoscape) + read-only API (`ApiStack`) + site (`FrontendStack`) | Built and tested locally; committed |
+| 14a | Real fault injection (`npm run fault`) + demo verifier (`npm run verify:demo`) | Built and tested locally |
 
-Tests passing: 282 unit (Lambdas), 46 (dashboard), 202 (infra), 51 (Python). Full `cdk synth` clean.
+Tests passing: 282 unit (Lambdas), 46 (dashboard), 232 (infra), 51 (Python). Full `cdk synth` clean (11 stacks).
 
 ## In progress / not yet done
 
-- **13b — live check of the dashboard.** Needs you to deploy (`deploy:dynamodb`, then
-  `deploy:frontend`), then I run `verify:dashboard`. Known risk: CloudFront may refuse to create a
-  distribution on a new account; if so we stop and decide.
-- **Stage 13 is uncommitted** on branch `stage-13-dashboard-api`. Commit and merge need your approval.
+- **13b — dashboard live through CloudFront: 19 PASS / 1 FAIL.** The failure is the account's Lambda
+  concurrency limit of 10 (quota increase to 1000 requested; AWS Support case open). The topology tier
+  (with Neptune) is not yet verified.
+- **Stage 13 is committed** on `stage-13-dashboard-api` (not merged: 13b not passed). Stage 14 work is
+  uncommitted on `stage-14-fault-injection`.
+- **14b — the live fault-injection demo** needs the full stack set deployed (about 2-3 h, $3-5).
 - **Nothing has been pushed.** `main` (Stages 11 and 12) is ahead of `origin/main`.
-- **Two stacks are still deployed** (idle, cents): `DynamodbStack`, `AlertingStack`. Tear down with
-  `destroy:alerts` then `destroy:dynamodb` when finished.
+- **Deployed right now:** `DynamodbStack`, `ApiStack`, `FrontendStack` (idle; CloudFront and the rest cost cents).
 
 ## Next steps, in order
 
-1. Deploy and verify Stage 13 tier 1 (DynamoDB only); then optionally tier 2 with Neptune
-   (about 1 h, roughly $0.5).
-2. Commit and merge Stage 13; decide when to push.
+1. Deploy and verify the API now (`deploy:api`, `verify:dashboard -- --api-only`); the full site once
+   AWS verifies CloudFront.
+2. Commit Stage 14a; decide when to merge Stages 13-14 and push.
 3. Optional: set the Slack webhook and PagerDuty key (SSM parameters) and re-run `verify:alerts`
    to prove the real HTTP legs (only unit-tested so far).
-4. **Stage 14 — end-to-end fault-injection demo:** bring the whole stack up, inject a real fault
-   into a Boutique service, and watch it flow through to an incident, an alert and the dashboard.
-   Needs the public storefront switched from an NLB to an ALB/Classic ELB (see below).
+4. **Stage 14b — the live demo:** bring the whole stack up, run `verify:demo` (a real 300 ms latency
+   fault in productcatalogservice), then the CPU fault. The storefront stays private (not needed).
 5. **Stage 15 — teardown discipline:** `cdk destroy` idle stacks between sessions.
 
 ## Things to remember

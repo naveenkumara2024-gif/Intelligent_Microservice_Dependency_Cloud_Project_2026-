@@ -1,5 +1,8 @@
 // Stage 13b checkpoint: the dashboard and its API, through the CloudFront URL (not the API URL).
 //
+//   npm run verify:dashboard -- --api-only      ApiStack alone, no CloudFront (deploy:dynamodb +
+//                                               deploy:api): calls the API URL directly with the
+//                                               origin header read from Secrets Manager
 //   npm run verify:dashboard                    DynamoDB-only tier (deploy:dynamodb + deploy:frontend)
 //   npm run verify:dashboard -- --topology      graph tier (also deploy:vpc, deploy:neptune,
 //                                               deploy:frontend -- -c topology=neptune; the graph
@@ -17,6 +20,7 @@ import { AttributeValue, marshallItem } from './incidents-live';
 
 const afterDestroy = process.argv.includes('--after-destroy');
 const withTopology = process.argv.includes('--topology');
+const apiOnly = process.argv.includes('--api-only');
 const checks: Check[] = [];
 const add = (c: Check) => checks.push(c);
 
@@ -29,15 +33,17 @@ const stackOutputs = (stack: string) => {
 
 // --- teardown mode ----------------------------------------------------------------------------
 if (afterDestroy) {
-  const stack = aws(['cloudformation', 'describe-stacks', '--stack-name', 'FrontendStack']);
-  add({ name: 'FrontendStack is gone', ok: !stack.ok && /does not exist/i.test(stack.stderr), detail: stack.ok ? 'stack still exists' : stack.stderr.split('\n')[0] });
+  for (const name of ['FrontendStack', 'ApiStack']) {
+    const stack = aws(['cloudformation', 'describe-stacks', '--stack-name', name]);
+    add({ name: `${name} is gone`, ok: !stack.ok && /does not exist/i.test(stack.stderr), detail: stack.ok ? 'stack still exists' : stack.stderr.split('\n')[0] });
+  }
 
   const dists = awsJson<{ DistributionList?: { Items?: { Id: string; Comment: string; Status: string }[] } }>(['cloudfront', 'list-distributions']);
   const left = (dists.value?.DistributionList?.Items ?? []).filter((d) => d.Comment === 'RCA dashboard');
   add({ name: 'No RCA dashboard distribution left', ok: !dists.error && left.length === 0, detail: dists.error ?? (left.map((d) => `${d.Id} ${d.Status}`).join(', ') || 'none') });
 
-  const apis = awsJson<{ Items?: { Name: string; ApiId: string }[] }>(['apigatewayv2', 'get-apis']);
-  const rest = (apis.value?.Items ?? []).filter((a) => a.Name.includes('Api') && a.Name.includes('Frontend'));
+  const apis = awsJson<{ Items?: { Name: string; ApiId: string; Description?: string }[] }>(['apigatewayv2', 'get-apis']);
+  const rest = (apis.value?.Items ?? []).filter((a) => a.Description === 'RCA dashboard API (read-only)');
   add({ name: 'No dashboard HTTP API left', ok: !apis.error && rest.length === 0, detail: apis.error ?? (rest.map((a) => a.ApiId).join(', ') || 'none') });
 
   const secrets = awsJson<{ SecretList?: { Name: string; DeletedDate?: string }[] }>(['secretsmanager', 'list-secrets', '--include-planned-deletion']);
@@ -52,13 +58,27 @@ if (afterDestroy) {
 }
 
 // --- deployed mode ----------------------------------------------------------------------------
-const out = stackOutputs('FrontendStack');
-if (!out.DashboardUrl || !out.ApiEndpoint) {
-  console.log('FAIL  FrontendStack: not deployed -- run npm run deploy:dynamodb then npm run deploy:frontend first');
+const out: Record<string, string> = { ...stackOutputs('ApiStack'), ...stackOutputs('FrontendStack') };
+if (!out.ApiEndpoint || (!apiOnly && !out.DashboardUrl)) {
+  console.log(
+    apiOnly
+      ? 'FAIL  ApiStack: not deployed -- run npm run deploy:dynamodb then npm run deploy:api first'
+      : 'FAIL  FrontendStack: not deployed -- run npm run deploy:frontend (or verify the API alone with --api-only)',
+  );
   process.exit(1);
 }
-const site = out.DashboardUrl.replace(/\/$/, '');
 const rawApi = out.ApiEndpoint.replace(/\/$/, '');
+const site = apiOnly ? rawApi : out.DashboardUrl.replace(/\/$/, '');
+/** In --api-only mode this script stands in for CloudFront and sends the origin header itself. */
+let authHeaders: Record<string, string> = {};
+if (apiOnly) {
+  const secret = awsJson<{ SecretString?: string }>(['secretsmanager', 'get-secret-value', '--secret-id', out.OriginSecretArn ?? 'missing']);
+  if (!secret.value?.SecretString) {
+    console.log(`FAIL  could not read the origin secret: ${secret.error ?? 'empty'}`);
+    process.exit(1);
+  }
+  authHeaders = { 'x-rca-origin': secret.value.SecretString };
+}
 const backend = out.TopologyBackend ?? 'none';
 
 add({
@@ -76,7 +96,9 @@ interface Reply {
 }
 
 async function get(url: string, init: { headers?: Record<string, string>; redirect?: 'follow' | 'manual' | 'error' } = {}): Promise<Reply> {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000) });
+  // Requests to the base URL carry the origin header in --api-only mode (it is never logged).
+  const headers = init.headers ?? (url.startsWith(site) ? authHeaders : {});
+  const res = await fetch(url, { ...init, headers, signal: AbortSignal.timeout(30_000) });
   const text = await res.text();
   let json: any;
   try {
@@ -104,8 +126,13 @@ async function until(url: string, ok: (r: Reply) => boolean, seconds = 90): Prom
 }
 
 async function main() {
-  // 1. The SPA ------------------------------------------------------------------------------------
-  console.log(`... checking ${site}`);
+  console.log(`... checking ${site}${apiOnly ? ' (API only; this script sends the origin header)' : ''}`);
+  if (!apiOnly) await checkSite();
+  await checkApi();
+}
+
+async function checkSite() {
+  // 1. The SPA (CloudFront only) -------------------------------------------------------------------
   const page = await until(`${site}/`, (r) => r.status === 200 && r.text.includes('id="root"'), 180);
   add({
     name: 'The SPA is served over HTTPS from the distribution',
@@ -142,15 +169,18 @@ async function main() {
     add({ name: 'Plain HTTP is redirected to HTTPS', ok: false, detail: String((err as Error).message) });
   }
 
-  // 2. The API through CloudFront, and the guard on the raw URL -------------------------------------
+}
+
+async function checkApi() {
+  // 2. The API (through CloudFront, or directly with --api-only), and the guard on the raw URL -----
   const health = await until(`${site}/api/health`, (r) => r.status === 200, 90);
   add({
-    name: '/api/health through CloudFront',
+    name: `/api/health ${apiOnly ? 'with the origin header' : 'through CloudFront'}`,
     ok: health?.status === 200 && health.json?.status === 'ok' && health.headers.get('cache-control') === 'no-store',
     detail: health ? `HTTP ${health.status}, cache-control=${health.headers.get('cache-control')}` : 'no response',
   });
 
-  const rawNoHeader = await get(`${rawApi}/api/health`);
+  const rawNoHeader = await get(`${rawApi}/api/health`, { headers: {} });
   const rawWrong = await get(`${rawApi}/api/health`, { headers: { 'x-rca-origin': 'not-the-secret' } });
   add({
     name: 'The raw execute-api URL refuses requests without the origin header',
@@ -262,7 +292,7 @@ async function main() {
         warn: topo?.headers.get('cache-control') !== 'public, max-age=10',
       });
       const again = await get(`${site}/api/topology`);
-      add({
+      if (!apiOnly) add({
         name: 'Second topology call is a CloudFront hit with the same generation time',
         ok: /hit/i.test(again.headers.get('x-cache') ?? '') && again.json?.generated_at_ms === t?.generated_at_ms,
         warn: true,

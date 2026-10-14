@@ -6,3 +6,6 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# Stage 14: faults currently applied to the cluster (scripts/fault-k8s.ts); machine-local state
+.fault-state.json

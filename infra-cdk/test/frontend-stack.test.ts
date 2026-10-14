@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
+import { ApiStack } from '../lib/api-stack';
 import { DynamodbStack } from '../lib/dynamodb-stack';
 import { FrontendStack } from '../lib/frontend-stack';
 import { NeptuneStack } from '../lib/neptune-stack';
@@ -30,18 +31,19 @@ function build(withTopology: boolean) {
       },
     };
   }
-  const stack = new FrontendStack(app, 'TestFrontendStack', {
+  const apiStack = new ApiStack(app, 'TestApiStack', {
     env,
     incidentsTable: dynamodbStack.incidentsTable,
     stateTable: dynamodbStack.stateTable,
     tableKey: dynamodbStack.key,
     topology,
   });
-  return Template.fromStack(stack);
+  const frontendStack = new FrontendStack(app, 'TestFrontendStack', { env, api: apiStack.api, originSecret: apiStack.originSecret });
+  return { api: Template.fromStack(apiStack), site: Template.fromStack(frontendStack) };
 }
 
-const plain = build(false);
-const graph = build(true);
+const { api: plain, site } = build(false);
+const { api: graph } = build(true);
 
 type Statement = { Action: string | string[]; Resource: unknown; Effect: string; Condition?: unknown };
 const actionsOf = (s: { Action: string | string[] }) => (Array.isArray(s.Action) ? s.Action : [s.Action]);
@@ -59,9 +61,24 @@ function statementsFor(t: Template, handler: string): Statement[] {
 
 const WRITES = /^dynamodb:(Put|Update|Delete|BatchWrite|Transact)|^dynamodb:Scan$|^neptune-db:(Write|Delete|Reset|Manage)/;
 
+describe('the split (Stage 14 decision 8)', () => {
+  test('the API stack holds no CloudFront or S3 site, so it deploys on an account without CloudFront', () => {
+    plain.resourceCountIs('AWS::CloudFront::Distribution', 0);
+    plain.resourceCountIs('AWS::S3::Bucket', 0);
+    plain.resourceCountIs('AWS::ApiGatewayV2::Api', 1);
+  });
+
+  test('the site stack holds no Lambda functions of the API', () => {
+    const handlers = Object.values(site.findResources('AWS::Lambda::Function')).map((f) => f.Properties.Handler);
+    expect(handlers).not.toContain(HANDLER_INCIDENTS);
+    expect(handlers).not.toContain(HANDLER_TOPOLOGY);
+    site.resourceCountIs('AWS::ApiGatewayV2::Api', 0);
+  });
+});
+
 describe('FrontendStack: static site', () => {
   test('the bucket is private, TLS-only, encrypted, and removed with the stack', () => {
-    const bucket = Object.values(plain.findResources('AWS::S3::Bucket')).find((b) => !b.Properties.Tags?.some((t: { Key: string }) => t.Key === 'aws-cdk:cr-owned'))!;
+    const bucket = Object.values(site.findResources('AWS::S3::Bucket'))[0];
     expect(bucket.Properties.PublicAccessBlockConfiguration).toEqual({
       BlockPublicAcls: true,
       BlockPublicPolicy: true,
@@ -70,13 +87,12 @@ describe('FrontendStack: static site', () => {
     });
     expect(JSON.stringify(bucket.Properties.BucketEncryption)).toContain('AES256');
     expect(bucket.DeletionPolicy).toBe('Delete');
-    const policies = JSON.stringify(plain.findResources('AWS::S3::BucketPolicy'));
-    expect(policies).toContain('aws:SecureTransport');
+    expect(JSON.stringify(site.findResources('AWS::S3::BucketPolicy'))).toContain('aws:SecureTransport');
   });
 
   test('CloudFront reads it through Origin Access Control, and no statement allows the public', () => {
-    plain.resourceCountIs('AWS::CloudFront::OriginAccessControl', 1);
-    const statements = Object.values(plain.findResources('AWS::S3::BucketPolicy')).flatMap(
+    site.resourceCountIs('AWS::CloudFront::OriginAccessControl', 1);
+    const statements = Object.values(site.findResources('AWS::S3::BucketPolicy')).flatMap(
       (p) => p.Properties.PolicyDocument.Statement,
     ) as { Effect: string; Principal: unknown }[];
     expect(JSON.stringify(statements)).toContain('cloudfront.amazonaws.com');
@@ -85,10 +101,14 @@ describe('FrontendStack: static site', () => {
     );
     expect(publicAllows).toEqual([]);
   });
+
+  test('the built SPA is deployed into the bucket and the distribution is invalidated', () => {
+    site.resourceCountIs('Custom::CDKBucketDeployment', 1);
+  });
 });
 
 describe('FrontendStack: distribution', () => {
-  const dist = () => Object.values(plain.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
+  const dist = () => Object.values(site.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig;
 
   test('HTTPS only (HTTP is redirected), GET/HEAD only, index.html at the root', () => {
     expect(dist().DefaultRootObject).toBe('index.html');
@@ -98,7 +118,7 @@ describe('FrontendStack: distribution', () => {
     expect(dist().DefaultCacheBehavior.AllowedMethods).toEqual(['GET', 'HEAD']);
   });
 
-  test('/api/* goes to the API over HTTPS only, GET/HEAD only', () => {
+  test('/api/* goes to the API over HTTPS only, GET/HEAD only, with the origin header', () => {
     const behavior = (dist().CacheBehaviors as { PathPattern: string }[]).find((b) => b.PathPattern === '/api/*') as any;
     expect(behavior).toBeDefined();
     expect(behavior.ViewerProtocolPolicy).toBe('https-only');
@@ -110,7 +130,7 @@ describe('FrontendStack: distribution', () => {
   });
 
   test('security headers are attached to both behaviours', () => {
-    const policy = Object.values(plain.findResources('AWS::CloudFront::ResponseHeadersPolicy'))[0].Properties.ResponseHeadersPolicyConfig
+    const policy = Object.values(site.findResources('AWS::CloudFront::ResponseHeadersPolicy'))[0].Properties.ResponseHeadersPolicyConfig
       .SecurityHeadersConfig;
     expect(policy.StrictTransportSecurity.AccessControlMaxAgeSec).toBe(31536000);
     expect(policy.ContentTypeOptions.Override).toBe(true);
@@ -123,7 +143,7 @@ describe('FrontendStack: distribution', () => {
   });
 
   test('the API cache policy honours the origin Cache-Control and caps it at 30 s', () => {
-    const configs = Object.values(plain.findResources('AWS::CloudFront::CachePolicy')).map((p) => p.Properties.CachePolicyConfig);
+    const configs = Object.values(site.findResources('AWS::CloudFront::CachePolicy')).map((p) => p.Properties.CachePolicyConfig);
     const api = configs.find((c) => c.MaxTTL === 30)!;
     expect(api.DefaultTTL).toBe(0);
     expect(api.MinTTL).toBe(0);
@@ -132,33 +152,32 @@ describe('FrontendStack: distribution', () => {
   });
 });
 
-describe('FrontendStack: the origin guard', () => {
-  test('a generated secret feeds both the CloudFront header and the Lambdas, and is never a literal', () => {
+describe('the origin guard', () => {
+  test('a generated secret feeds the Lambdas and the CloudFront header, and is never a literal', () => {
     plain.resourceCountIs('AWS::SecretsManager::Secret', 1);
     const secret = Object.values(plain.findResources('AWS::SecretsManager::Secret'))[0];
     expect(secret.Properties.GenerateSecretString.PasswordLength).toBe(40);
     expect(secret.DeletionPolicy).toBe('Delete');
 
     const resolved = (v: unknown) => JSON.stringify(v).includes('{{resolve:secretsmanager:');
-    const origin = (Object.values(plain.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig.Origins as any[]).find(
-      (o) => o.CustomOriginConfig,
-    );
-    expect(resolved(origin.OriginCustomHeaders[0].HeaderValue)).toBe(true);
     for (const handler of [HANDLER_INCIDENTS, HANDLER_TOPOLOGY]) {
       expect(resolved(fn(plain, handler).Properties.Environment.Variables.ORIGIN_SECRET)).toBe(true);
     }
+    const origin = (Object.values(site.findResources('AWS::CloudFront::Distribution'))[0].Properties.DistributionConfig.Origins as any[]).find(
+      (o) => o.CustomOriginConfig,
+    );
+    expect(resolved(origin.OriginCustomHeaders[0].HeaderValue)).toBe(true);
+  });
+
+  test('the API stack outputs the secret ARN for local tooling, never the value', () => {
+    plain.hasOutput('OriginSecretArn', { Value: { Ref: Match.anyValue() } });
   });
 });
 
-describe('FrontendStack: HTTP API', () => {
+describe('ApiStack: HTTP API', () => {
   test('exactly four GET routes, no catch-all, no write methods', () => {
     const routes = Object.values(plain.findResources('AWS::ApiGatewayV2::Route')).map((r) => r.Properties.RouteKey as string);
-    expect(routes.sort()).toEqual([
-      'GET /api/health',
-      'GET /api/incidents',
-      'GET /api/incidents/{id}',
-      'GET /api/topology',
-    ]);
+    expect(routes.sort()).toEqual(['GET /api/health', 'GET /api/incidents', 'GET /api/incidents/{id}', 'GET /api/topology']);
   });
 
   test('the default stage is throttled for an account whose Lambda concurrency limit is 10', () => {
@@ -177,8 +196,8 @@ describe('FrontendStack: HTTP API', () => {
   });
 });
 
-describe('FrontendStack: Lambdas without a graph backend (the default)', () => {
-  test('both run outside any VPC, Node 22, with the bundle handlers', () => {
+describe('ApiStack: Lambdas without a graph backend (the default)', () => {
+  test('both run outside any VPC, Node 22', () => {
     for (const handler of [HANDLER_INCIDENTS, HANDLER_TOPOLOGY]) {
       const f = fn(plain, handler);
       expect(f.Properties.Runtime).toBe('nodejs22.x');
@@ -216,7 +235,7 @@ describe('FrontendStack: Lambdas without a graph backend (the default)', () => {
   });
 });
 
-describe('FrontendStack: with the Neptune graph backend', () => {
+describe('ApiStack: with the Neptune graph backend', () => {
   test('the topology function joins the private-app subnets and gets the cluster endpoint', () => {
     const f = fn(graph, HANDLER_TOPOLOGY);
     const subnets = JSON.stringify(f.Properties.VpcConfig.SubnetIds);
@@ -240,29 +259,22 @@ describe('FrontendStack: with the Neptune graph backend', () => {
   });
 
   test('nothing in the VPC function can write, and only ENI actions are unscoped', () => {
-    const statements = statementsFor(graph, HANDLER_TOPOLOGY);
-    for (const s of statements) {
+    for (const s of statementsFor(graph, HANDLER_TOPOLOGY)) {
       for (const a of actionsOf(s)) expect(a).not.toMatch(WRITES);
       if (s.Resource === '*') for (const a of actionsOf(s)) expect(a).toMatch(/^ec2:/);
     }
   });
 });
 
-describe('FrontendStack: housekeeping', () => {
-  test('log groups are owned by the stack and expire', () => {
+describe('housekeeping', () => {
+  test('log groups are owned by the API stack and expire', () => {
     const groups = Object.values(plain.findResources('AWS::Logs::LogGroup'));
     expect(groups.length).toBeGreaterThanOrEqual(2);
     for (const g of groups) expect(g.DeletionPolicy).toBe('Delete');
   });
 
-  test('outputs the values the verify script reads', () => {
-    for (const o of ['DashboardUrl', 'DistributionId', 'ApiEndpoint', 'SiteBucketName', 'IncidentsFunctionName', 'TopologyFunctionName']) {
-      plain.hasOutput(o, {});
-    }
-    plain.hasOutput('DashboardUrl', { Value: Match.anyValue() });
-  });
-
-  test('the built SPA is deployed into the bucket and the distribution is invalidated', () => {
-    plain.resourceCountIs('Custom::CDKBucketDeployment', 1);
+  test('outputs the values the scripts read', () => {
+    for (const o of ['ApiEndpoint', 'OriginSecretArn', 'IncidentsFunctionName', 'TopologyFunctionName', 'TopologyBackend']) plain.hasOutput(o, {});
+    for (const o of ['DashboardUrl', 'DistributionId', 'SiteBucketName']) site.hasOutput(o, {});
   });
 });
