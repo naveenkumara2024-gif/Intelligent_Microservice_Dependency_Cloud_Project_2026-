@@ -9,7 +9,8 @@ import { incidentNodeIds, incidentsFor } from './graph';
 import type { Incident } from './types';
 import { useNow, usePolling } from './usePolling';
 
-const POLL_MS = 10_000;
+// The topology's recent window and the API cache (5 s) make faster polling pointless.
+const POLL_MS = 5_000;
 const HISTORY_POLL_MS = 30_000;
 
 type Selection = { kind: 'node'; id: string } | { kind: 'incident'; id: string } | undefined;

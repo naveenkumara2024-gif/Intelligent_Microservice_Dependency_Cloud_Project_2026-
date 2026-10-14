@@ -16,6 +16,13 @@ export interface TopologyNode {
   status: NodeStatus;
   /** The incident that decided `status` (null when healthy). */
   incident_id: string | null;
+  /** Call-weighted latency INTO this service over the recent window, or null without calls/window. */
+  recent_avg_ms: number | null;
+  /**
+   * At least 2x its baseline over the recent window, by the scorer's own rule. This reacts within
+   * seconds; `status` comes from incidents, which need 2 implicated minutes and the model.
+   */
+  degraded: boolean;
 }
 
 export interface TopologyEdge {
@@ -25,6 +32,10 @@ export interface TopologyEdge {
   /** Lifetime average (latency_sum / call_count): Neptune stores monotonic counters only. */
   avg_latency_ms: number;
   p95_latency_ms: number | null;
+  /** Calls in the recent window (0 when idle or when there is no window). */
+  recent_calls: number;
+  /** Average latency over the recent window; null when the edge was idle or there is no window. */
+  recent_avg_latency_ms: number | null;
 }
 
 export interface TopologyResponse {
@@ -35,6 +46,12 @@ export interface TopologyResponse {
   /** True when the edge list was cut at the response limit (busiest edges are kept). */
   truncated: boolean;
   open_incidents: string[];
+  /**
+   * Length of the recent window the `recent_*` figures cover (Neptune now minus the scorer's last
+   * snapshot, topped up with its last full window when that is short), or null when there is none
+   * yet (no scorer run, or the graph was reset).
+   */
+  recent_window_ms: number | null;
 }
 
 export interface IncidentView {

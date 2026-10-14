@@ -78,7 +78,7 @@ export async function runCycle(deps: CycleDeps): Promise<CycleSummary> {
 
   if (result.kind !== 'ok') {
     // First run, or the graph was reset under us: remember where the counters are, judge nothing.
-    const next: ScorerState = { ...state, counters: snapshot.edges, updatedMs: nowMs };
+    const next: ScorerState = { ...state, counters: snapshot.edges, lastWindow: undefined, lastWindowMs: undefined, updatedMs: nowMs };
     const committed = await deps.store.commit(next, []);
     return {
       status: committed ? result.kind : 'conflict',
@@ -134,6 +134,8 @@ export async function runCycle(deps: CycleDeps): Promise<CycleSummary> {
     ...state,
     windows: state.windows + 1,
     counters: snapshot.edges,
+    lastWindow: result.edges.map(({ um, dm, calls, sumMs }) => ({ um, dm, calls, sumMs })),
+    lastWindowMs: Math.max(0, nowMs - state.updatedMs),
     baselines: updateBaselines(state.baselines, observed, deltas, cfg),
     trackers,
     updatedMs: nowMs,

@@ -229,6 +229,10 @@ button:focus-visible {
   border-color: var(--c-risk);
   border-style: dashed;
 }
+.status-degraded .legend-swatch {
+  background: var(--c-surface);
+  border: 4px double var(--c-root);
+}
 .legend-note {
   margin-left: auto;
 }

@@ -62,7 +62,7 @@ export class FrontendStack extends cdk.Stack {
       },
     });
 
-    // Honour the Cache-Control the Lambdas send (topology: 10 s; everything else: no-store).
+    // Honour the Cache-Control the Lambdas send (topology: 5 s; everything else: no-store).
     const apiCachePolicy = new cloudfront.CachePolicy(this, 'ApiCachePolicy', {
       defaultTtl: cdk.Duration.seconds(0),
       minTtl: cdk.Duration.seconds(0),

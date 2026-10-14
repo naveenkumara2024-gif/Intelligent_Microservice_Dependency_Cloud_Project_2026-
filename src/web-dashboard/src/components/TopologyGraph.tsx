@@ -68,6 +68,8 @@ function stylesheet(t: ReturnType<typeof tokens>): StylesheetJson {
       selector: 'node.root_cause',
       style: { 'background-color': t.root, 'border-color': t.root, shape: 'octagon', width: 50, height: 50, 'font-weight': 700 },
     },
+    // Slow right now (>= 2x baseline): a thick double ring, so it reads on top of any status.
+    { selector: 'node.degraded', style: { 'border-color': t.root, 'border-width': 6, 'border-style': 'double' } },
     {
       selector: 'edge',
       style: {
@@ -195,6 +197,8 @@ export function TopologyGraph({ topology, selectedNode, highlighted, onSelectNod
   }, [selectedNode, highlighted, elements]);
 
   const counts = STATUS_ORDER.map((s) => ({ s, n: topology.nodes.filter((x) => x.status === s).length }));
+  const slowNow = topology.nodes.filter((x) => x.degraded).length;
+  const windowS = topology.recent_window_ms === null ? null : Math.max(1, Math.round(topology.recent_window_ms / 1000));
   return (
     <figure className="graph" aria-label="Service dependency graph">
       <div ref={container} className="graph-canvas" role="img" aria-label={`Dependency graph of ${topology.nodes.length} services and ${topology.edges.length} calls`} />
@@ -202,6 +206,7 @@ export function TopologyGraph({ topology, selectedNode, highlighted, onSelectNod
         {topology.nodes.map((n) => (
           <li key={n.id}>
             {n.id}: {STATUS[n.status].label}
+            {n.degraded ? ' (slow now)' : ''}
           </li>
         ))}
       </ul>
@@ -212,7 +217,14 @@ export function TopologyGraph({ topology, selectedNode, highlighted, onSelectNod
             {STATUS[s].label} <b>{n}</b>
           </span>
         ))}
-        <span className="legend-note">Edge width = call volume · label = lifetime average latency</span>
+        <span className="legend-item status-degraded" title="At least 2x its baseline latency right now. Shows within seconds; an incident needs 2 slow minutes and the model.">
+          <i className="legend-swatch" aria-hidden="true" />
+          Slow now <b>{slowNow}</b>
+        </span>
+        <span className="legend-note">
+          Edge width = call volume · label ={' '}
+          {windowS === null ? 'lifetime average latency' : `average latency over the last ${windowS} s`}
+        </span>
       </figcaption>
     </figure>
   );

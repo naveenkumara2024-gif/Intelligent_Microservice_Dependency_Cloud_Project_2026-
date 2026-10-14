@@ -208,7 +208,7 @@ describe('ApiStack: Lambdas without a graph backend (the default)', () => {
   test('the topology function has no graph endpoint, so it answers 503', () => {
     const vars = fn(plain, HANDLER_TOPOLOGY).Properties.Environment.Variables;
     expect(vars.GREMLIN_URL).toBeUndefined();
-    expect(vars.TOPOLOGY_CACHE_SECONDS).toBe('10');
+    expect(vars.TOPOLOGY_CACHE_SECONDS).toBe('5');
     plain.hasOutput('TopologyBackend', { Value: 'none' });
   });
 

@@ -147,6 +147,26 @@ describe('runCycle', () => {
     expect(next.anomalous).toEqual([]);
   });
 
+  test('remembers its last window (for the dashboard), and forgets it on a first or reset window', async () => {
+    const h = harness();
+    h.graph.advance();
+    await runCycle(h.deps);
+    expect(h.store.state!.lastWindow).toBeUndefined();
+
+    await h.minute({ paymentservice: 3 }, 40);
+    const st = h.store.state!;
+    expect(st.lastWindowMs).toBe(MIN);
+    const pay = st.lastWindow!.find((e) => e.dm === 'paymentservice')!;
+    expect(pay).toEqual({ um: 'checkoutservice', dm: 'paymentservice', calls: 40, sumMs: 40 * 30 });
+    expect(Object.keys(pay)).not.toContain('hist');
+
+    h.graph.wipe();
+    h.graph.advance(50);
+    await runCycle(h.deps);
+    expect(h.store.state!.lastWindow).toBeUndefined();
+    expect(h.store.state!.lastWindowMs).toBeUndefined();
+  });
+
   test('overlapping runs: the loser commits nothing and reports a conflict', async () => {
     const h = harness();
     await warmUp(h);

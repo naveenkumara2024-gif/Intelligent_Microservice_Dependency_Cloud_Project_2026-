@@ -15,4 +15,4 @@ export const API_RATE_LIMIT = 5;
 export const API_BURST_LIMIT = 10;
 
 /** How long CloudFront (and browsers) may reuse a topology response. */
-export const TOPOLOGY_CACHE_SECONDS = 10;
+export const TOPOLOGY_CACHE_SECONDS = 5;

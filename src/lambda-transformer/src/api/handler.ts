@@ -14,7 +14,7 @@ import { DEFAULT_TABLES, documentClient, DynamoScorerStore, listIncidents, Table
 import { ScorerState } from '../scorer/types';
 import { BadRequest, getIncidentView, listIncidentViews, parseListQuery } from './incidents';
 import { errorBody, internalError, json, lowerCaseHeaders, methodOf, originAllowed } from './http';
-import { buildTopology } from './topology';
+import { buildTopology, recentWindow } from './topology';
 import { HttpApiEvent, HttpApiResult } from './types';
 
 export interface ApiDeps {
@@ -23,7 +23,7 @@ export interface ApiDeps {
   tables: TableNames;
   /** Absent in the no-VPC function (and when the topology backend is not deployed). */
   graph?: GraphSource;
-  /** The scorer's state item, for baselines. */
+  /** The scorer's state item: baselines, and the counters the recent window is measured from. */
   state: { load(): Promise<ScorerState | undefined> };
   now: () => number;
   topologyCacheSeconds: number;
@@ -50,7 +50,8 @@ export async function handleTopology(event: HttpApiEvent, deps: ApiDeps): Promis
       listIncidents(deps.doc, { status: 'OPEN', limit: TOPOLOGY_INCIDENT_LIMIT, nowMs: deps.now() }, deps.tables),
       deps.state.load(),
     ]);
-    const body = buildTopology(snapshot, open, state?.baselines ?? {}, deps.now());
+    const nowMs = deps.now();
+    const body = buildTopology(snapshot, open, state?.baselines ?? {}, nowMs, recentWindow(snapshot, state, nowMs));
     return json(200, body, { cacheSeconds: deps.topologyCacheSeconds });
   } catch (err) {
     return internalError('topology', err);
@@ -109,7 +110,7 @@ export function buildDeps(env: NodeJS.ProcessEnv = process.env): ApiDeps {
     graph,
     state: new DynamoScorerStore(doc, tables),
     now: Date.now,
-    topologyCacheSeconds: Number(env.TOPOLOGY_CACHE_SECONDS ?? 10),
+    topologyCacheSeconds: Number(env.TOPOLOGY_CACHE_SECONDS ?? 5),
   };
   return cached;
 }

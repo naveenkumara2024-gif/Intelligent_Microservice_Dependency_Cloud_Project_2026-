@@ -111,6 +111,13 @@ export interface ScorerState {
   windows: number;
   /** Cumulative counters at the end of the previous run. */
   counters: EdgeCounters[];
+  /**
+   * What each edge did in the last scored window, and how long that window was. Only the dashboard
+   * reads these (api/topology.ts), to keep its "right now" figures meaningful just after a run.
+   * Absent in state written before they existed, and after a first or reset window.
+   */
+  lastWindow?: { um: string; dm: string; calls: number; sumMs: number }[];
+  lastWindowMs?: number;
   baselines: Record<string, Baseline>;
   trackers: Record<string, Tracker>;
   updatedMs: number;
