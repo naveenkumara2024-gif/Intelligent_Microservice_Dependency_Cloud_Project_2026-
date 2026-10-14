@@ -6,6 +6,8 @@ import {
   incidentNodeIds,
   incidentsFor,
   layoutKey,
+  edgeLabel,
+  nodeClasses,
   roleIn,
   statusCounts,
   toElements,
@@ -27,7 +29,7 @@ describe('toElements', () => {
 
   test('status becomes the class, so styling can key on it', () => {
     const byId = Object.fromEntries(nodes(els).map((n) => [n.data.id, n.classes]));
-    expect(byId.productcatalogservice).toBe('root_cause');
+    expect(byId.productcatalogservice).toBe('root_cause degraded');
     expect(byId.checkoutservice).toBe('affected');
     expect(byId.frontend).toBe('at_risk');
     expect(byId.paymentservice).toBe('healthy');
@@ -41,25 +43,62 @@ describe('toElements', () => {
     expect(new Set(hot)).toEqual(new Set(['productcatalogservice', 'checkoutservice']));
   });
 
-  test('edge width stays within bounds; the label is the lifetime average latency', () => {
+  test('edge width stays within bounds; the label is the RECENT latency, not the lifetime one', () => {
     for (const e of edges(els)) {
       expect(e.data.width).toBeGreaterThanOrEqual(1.5);
       expect(e.data.width).toBeLessThanOrEqual(5);
     }
     const slow = edges(els).find((e) => e.data.source === 'checkoutservice' && e.data.target === 'productcatalogservice')!;
+    expect(slow.data.label).toBe('60.0 ms');
+    expect(slow.data.avg_latency_ms).toBeCloseTo(26.67, 2);
+  });
+
+  test('before the scorer has a snapshot, labels fall back to the lifetime average', () => {
+    const t = { ...topologyGolden, recent_window_ms: null };
+    const slow = edges(toElements(t)).find((e) => e.data.source === 'checkoutservice' && e.data.target === 'productcatalogservice')!;
     expect(slow.data.label).toBe('26.7 ms');
+  });
+
+  test('a service slow right now is marked and its incoming calls are hot, even with no incident yet', () => {
+    const t = {
+      ...topologyGolden,
+      open_incidents: [],
+      nodes: topologyGolden.nodes.map((n) => ({ ...n, status: 'healthy' as const, incident_id: null })),
+    };
+    const els2 = toElements(t);
+    const byId = Object.fromEntries(nodes(els2).map((n) => [n.data.id, n.classes]));
+    expect(byId.productcatalogservice).toBe('healthy degraded');
+    expect(byId.paymentservice).toBe('healthy');
+    const hot = new Set(edges(els2).filter((e) => e.classes === 'hot').map((e) => e.data.target));
+    expect(hot).toEqual(new Set(['productcatalogservice']));
   });
 
   test('an edge whose endpoint is not a node is dropped rather than crashing the layout', () => {
     const t = {
       ...topologyGolden,
-      edges: [...topologyGolden.edges, { source: 'a', target: 'ghost', call_count: 1, avg_latency_ms: 1, p95_latency_ms: null }],
+      edges: [
+        ...topologyGolden.edges,
+        { source: 'a', target: 'ghost', call_count: 1, avg_latency_ms: 1, p95_latency_ms: null, recent_calls: 0, recent_avg_latency_ms: null },
+      ],
     };
     expect(edges(toElements(t))).toHaveLength(topologyGolden.edges.length);
   });
 });
 
 describe('helpers', () => {
+  test('edgeLabel: recent latency, "idle" without recent calls, lifetime only without a window', () => {
+    const e = { source: 'a', target: 'b', call_count: 9, avg_latency_ms: 46, p95_latency_ms: null, recent_calls: 30, recent_avg_latency_ms: 0.4 };
+    expect(edgeLabel(e, true)).toBe('0.40 ms');
+    expect(edgeLabel({ ...e, recent_calls: 0, recent_avg_latency_ms: null }, true)).toBe('idle');
+    expect(edgeLabel(e, false)).toBe('46.0 ms');
+  });
+
+  test('nodeClasses adds degraded on top of the status', () => {
+    const n = topologyGolden.nodes[0];
+    expect(nodeClasses({ ...n, status: 'at_risk', degraded: false })).toBe('at_risk');
+    expect(nodeClasses({ ...n, status: 'at_risk', degraded: true })).toBe('at_risk degraded');
+  });
+
   test('edgeWidth is monotonic, square-root scaled and safe on zero', () => {
     expect(edgeWidth(0, 100)).toBe(1.5);
     expect(edgeWidth(5, 0)).toBe(1.5);

@@ -28,6 +28,20 @@ export function edgeId(e: Pick<TopologyEdge, 'source' | 'target'>): string {
 
 const labelOf = (n: TopologyNode) => n.id;
 
+/**
+ * The edge label: latency over the recent window, which is what moves when a fault starts or
+ * stops. The lifetime average is only the fallback before the scorer has a snapshot to measure from.
+ */
+export function edgeLabel(e: TopologyEdge, hasWindow: boolean): string {
+  if (!hasWindow) return formatMs(e.avg_latency_ms);
+  return e.recent_avg_latency_ms === null ? 'idle' : formatMs(e.recent_avg_latency_ms);
+}
+
+/** Cytoscape classes of a node: its incident status, plus `degraded` when it is slow right now. */
+export function nodeClasses(n: TopologyNode): string {
+  return n.degraded ? `${n.status} degraded` : n.status;
+}
+
 export function toElements(t: TopologyResponse): ElementDefinition[] {
   const maxCount = t.edges.reduce((m, e) => Math.max(m, e.call_count), 0);
   const nodeIds = new Set(t.nodes.map((n) => n.id));
@@ -42,17 +56,21 @@ export function toElements(t: TopologyResponse): ElementDefinition[] {
       baseline_ms: n.baseline_ms,
       calls_as_caller: n.calls_as_caller,
       calls_as_callee: n.calls_as_callee,
+      recent_avg_ms: n.recent_avg_ms,
+      degraded: n.degraded,
     },
-    classes: n.status,
+    classes: nodeClasses(n),
   }));
 
-  const targetStatus = new Map(t.nodes.map((n) => [n.id, n.status] as const));
+  const hasWindow = t.recent_window_ms !== null;
+  const byId = new Map(t.nodes.map((n) => [n.id, n] as const));
   const edges: ElementDefinition[] = t.edges
     // An edge to a vertex that is not in the node list cannot be drawn; the API adds endpoints, so
     // this only guards a truncated or hand-edited response.
     .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
     .map((e) => {
-      const status = targetStatus.get(e.target) ?? 'healthy';
+      const target = byId.get(e.target);
+      const status = target?.status ?? 'healthy';
       return {
         group: 'edges' as const,
         data: {
@@ -60,13 +78,15 @@ export function toElements(t: TopologyResponse): ElementDefinition[] {
           source: e.source,
           target: e.target,
           width: edgeWidth(e.call_count, maxCount),
-          label: formatMs(e.avg_latency_ms),
+          label: edgeLabel(e, hasWindow),
           call_count: e.call_count,
           avg_latency_ms: e.avg_latency_ms,
           p95_latency_ms: e.p95_latency_ms,
+          recent_avg_latency_ms: e.recent_avg_latency_ms,
         },
-        // Calls INTO a degraded service are the hot path of the incident.
-        classes: status === 'root_cause' || status === 'affected' ? 'hot' : '',
+        // Calls INTO a degraded service are the hot path (of an incident, or of a slowdown so new
+        // that no incident has opened yet).
+        classes: status === 'root_cause' || status === 'affected' || target?.degraded ? 'hot' : '',
       };
     });
 
@@ -109,5 +129,7 @@ export function roleIn(service: string, incident: Incident): 'root cause' | 'aff
 export function describeNode(n: TopologyNode): string {
   const parts = [`${formatCount(n.calls_as_callee)} calls received`, `${formatCount(n.calls_as_caller)} calls made`];
   if (n.baseline_ms !== null) parts.push(`baseline ${formatMs(n.baseline_ms)}`);
+  if (n.recent_avg_ms !== null) parts.push(`now ${formatMs(n.recent_avg_ms)}`);
+  if (n.degraded) parts.push('slow now');
   return parts.join(' · ');
 }

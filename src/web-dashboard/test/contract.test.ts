@@ -10,17 +10,36 @@ describe('API contract v1 (the golden files the Lambda tests write)', () => {
       'generated_at_ms',
       'nodes',
       'open_incidents',
+      'recent_window_ms',
       'schema_version',
       'truncated',
     ]);
     expect(topologyGolden.schema_version).toBe(1);
     for (const n of topologyGolden.nodes) {
-      expect(Object.keys(n).sort()).toEqual(['baseline_ms', 'calls_as_callee', 'calls_as_caller', 'id', 'incident_id', 'status']);
+      expect(Object.keys(n).sort()).toEqual([
+        'baseline_ms',
+        'calls_as_callee',
+        'calls_as_caller',
+        'degraded',
+        'id',
+        'incident_id',
+        'recent_avg_ms',
+        'status',
+      ]);
+      expect(typeof n.degraded).toBe('boolean');
       expect(STATUSES).toContain(n.status);
       expect(n.baseline_ms === null || typeof n.baseline_ms === 'number').toBe(true);
     }
     for (const e of topologyGolden.edges) {
-      expect(Object.keys(e).sort()).toEqual(['avg_latency_ms', 'call_count', 'p95_latency_ms', 'source', 'target']);
+      expect(Object.keys(e).sort()).toEqual([
+        'avg_latency_ms',
+        'call_count',
+        'p95_latency_ms',
+        'recent_avg_latency_ms',
+        'recent_calls',
+        'source',
+        'target',
+      ]);
     }
   });
 

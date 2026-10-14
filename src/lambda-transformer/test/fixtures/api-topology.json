@@ -8,7 +8,9 @@
       "calls_as_callee": 150,
       "baseline_ms": null,
       "status": "affected",
-      "incident_id": "1791892800000-productcatalogservice"
+      "incident_id": "1791892800000-productcatalogservice",
+      "recent_avg_ms": 10,
+      "degraded": false
     },
     {
       "id": "currencyservice",
@@ -16,7 +18,9 @@
       "calls_as_callee": 300,
       "baseline_ms": null,
       "status": "healthy",
-      "incident_id": null
+      "incident_id": null,
+      "recent_avg_ms": 10,
+      "degraded": false
     },
     {
       "id": "emailservice",
@@ -24,7 +28,9 @@
       "calls_as_callee": 150,
       "baseline_ms": null,
       "status": "healthy",
-      "incident_id": null
+      "incident_id": null,
+      "recent_avg_ms": 10,
+      "degraded": false
     },
     {
       "id": "frontend",
@@ -32,7 +38,9 @@
       "calls_as_callee": 0,
       "baseline_ms": 10,
       "status": "at_risk",
-      "incident_id": "1791892800000-productcatalogservice"
+      "incident_id": "1791892800000-productcatalogservice",
+      "recent_avg_ms": null,
+      "degraded": false
     },
     {
       "id": "paymentservice",
@@ -40,7 +48,9 @@
       "calls_as_callee": 150,
       "baseline_ms": null,
       "status": "healthy",
-      "incident_id": null
+      "incident_id": null,
+      "recent_avg_ms": 10,
+      "degraded": false
     },
     {
       "id": "productcatalogservice",
@@ -48,7 +58,9 @@
       "calls_as_callee": 450,
       "baseline_ms": 10,
       "status": "root_cause",
-      "incident_id": "1791892800000-productcatalogservice"
+      "incident_id": "1791892800000-productcatalogservice",
+      "recent_avg_ms": 60,
+      "degraded": true
     },
     {
       "id": "recommendationservice",
@@ -56,7 +68,9 @@
       "calls_as_callee": 150,
       "baseline_ms": null,
       "status": "at_risk",
-      "incident_id": "1791892800000-productcatalogservice"
+      "incident_id": "1791892800000-productcatalogservice",
+      "recent_avg_ms": 10,
+      "degraded": false
     }
   ],
   "edges": [
@@ -65,67 +79,86 @@
       "target": "currencyservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "checkoutservice",
       "target": "emailservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "checkoutservice",
       "target": "paymentservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "checkoutservice",
       "target": "productcatalogservice",
       "call_count": 150,
       "avg_latency_ms": 26.667,
-      "p95_latency_ms": 100
+      "p95_latency_ms": 100,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 60
     },
     {
       "source": "frontend",
       "target": "checkoutservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "frontend",
       "target": "currencyservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "frontend",
       "target": "productcatalogservice",
       "call_count": 150,
       "avg_latency_ms": 26.667,
-      "p95_latency_ms": 100
+      "p95_latency_ms": 100,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 60
     },
     {
       "source": "frontend",
       "target": "recommendationservice",
       "call_count": 150,
       "avg_latency_ms": 10,
-      "p95_latency_ms": 10
+      "p95_latency_ms": 10,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 10
     },
     {
       "source": "recommendationservice",
       "target": "productcatalogservice",
       "call_count": 150,
       "avg_latency_ms": 26.667,
-      "p95_latency_ms": 100
+      "p95_latency_ms": 100,
+      "recent_calls": 50,
+      "recent_avg_latency_ms": 60
     }
   ],
   "truncated": false,
   "open_incidents": [
     "1791892800000-productcatalogservice"
-  ]
+  ],
+  "recent_window_ms": 30000
 }

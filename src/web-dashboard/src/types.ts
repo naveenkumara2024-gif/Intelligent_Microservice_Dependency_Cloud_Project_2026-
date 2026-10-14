@@ -10,14 +10,21 @@ export interface TopologyNode {
   baseline_ms: number | null;
   status: NodeStatus;
   incident_id: string | null;
+  /** Latency into this service over the recent window (null without calls or window). */
+  recent_avg_ms: number | null;
+  /** >= 2x its baseline right now; reacts in seconds, before an incident (`status`) can open. */
+  degraded: boolean;
 }
 
 export interface TopologyEdge {
   source: string;
   target: string;
   call_count: number;
+  /** Lifetime average. */
   avg_latency_ms: number;
   p95_latency_ms: number | null;
+  recent_calls: number;
+  recent_avg_latency_ms: number | null;
 }
 
 export interface TopologyResponse {
@@ -27,6 +34,8 @@ export interface TopologyResponse {
   edges: TopologyEdge[];
   truncated: boolean;
   open_incidents: string[];
+  /** How far back the `recent_*` figures reach; null when the scorer has no snapshot yet. */
+  recent_window_ms: number | null;
 }
 
 export interface Evidence {

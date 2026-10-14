@@ -129,6 +129,16 @@ export function NodeDetail({ node, callers, callees, incidents, onSelectNode, on
         <dd>{formatCount(node.calls_as_caller)}</dd>
         <dt>Baseline latency</dt>
         <dd>{node.baseline_ms === null ? <span className="muted">not learned yet</span> : formatMs(node.baseline_ms)}</dd>
+        <dt>Latency now</dt>
+        <dd>
+          {node.recent_avg_ms === null ? <span className="muted">no recent calls</span> : formatMs(node.recent_avg_ms)}
+          {node.degraded ? (
+            <>
+              {' '}
+              <span className="pill status-root_cause">slow now</span>
+            </>
+          ) : null}
+        </dd>
       </dl>
 
       <h3>Called by</h3>
@@ -167,8 +177,9 @@ function EdgeList({ edges, other, onSelect }: { edges: TopologyEdge[]; other: 's
             {e[other]}
           </button>{' '}
           <span className="muted">
-            {formatCount(e.call_count)} calls · avg {formatMs(e.avg_latency_ms)}
-            {e.p95_latency_ms !== null ? ` · p95 ${formatMs(e.p95_latency_ms)}` : ''}
+            now {e.recent_avg_latency_ms === null ? 'idle' : formatMs(e.recent_avg_latency_ms)} · lifetime{' '}
+            {formatCount(e.call_count)} calls, avg {formatMs(e.avg_latency_ms)}
+            {e.p95_latency_ms !== null ? `, p95 ${formatMs(e.p95_latency_ms)}` : ''}
           </span>
         </li>
       ))}

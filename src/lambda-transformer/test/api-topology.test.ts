@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { bucketOf } from '../src/aggregate';
 import { handleTopology } from '../src/api/handler';
-import { buildTopology, MAX_EDGES } from '../src/api/topology';
+import { buildTopology, MAX_EDGES, MIN_RECENT_WINDOW_MS, RECENT_MIN_CALLS, recentWindow } from '../src/api/topology';
 import { EdgeCounters, GraphSnapshot, IncidentRecord, ScorerState } from '../src/scorer/types';
 import { incident, resolved, T0 } from './alert-helpers';
 import { apiDeps, event, FakeDoc } from './api-helpers';
@@ -104,6 +104,80 @@ describe('buildTopology: status overlay', () => {
   });
 });
 
+describe('recent window: what the graph is doing now, not over its lifetime', () => {
+  const warm = { b: { ms: 2, n: 20 } };
+  const stateAt = (counters: EdgeCounters[], updatedMs: number, extra: Partial<ScorerState> = {}): ScorerState => ({
+    version: 1,
+    windows: 20,
+    counters,
+    baselines: warm,
+    trackers: {},
+    updatedMs,
+    ...extra,
+  });
+  const ab = (calls: number, sumMs: number): EdgeCounters => ({ um: 'a', dm: 'b', calls, sumMs, hist: hist(1, calls) });
+
+  test('a fault cleared long ago: the lifetime average still shows it, the recent figures do not', () => {
+    // 10k calls at 2 ms, then 1k at 300 ms (the fault), then 100 healthy calls since the scorer ran.
+    const before = ab(11_000, 10_000 * 2 + 1_000 * 300);
+    const now = ab(11_100, before.sumMs + 100 * 2);
+    const recent = recentWindow(snap([now]), stateAt([before], NOW - 30_000), NOW)!;
+    const t = buildTopology(snap([now]), [], warm, NOW, recent);
+    expect(t.edges[0].avg_latency_ms).toBeGreaterThan(25);
+    expect(t.edges[0]).toMatchObject({ recent_calls: 100, recent_avg_latency_ms: 2 });
+    expect(t.recent_window_ms).toBe(30_000);
+    expect(t.nodes.find((n) => n.id === 'b')).toMatchObject({ recent_avg_ms: 2, degraded: false });
+  });
+
+  test('a fault starting now: the callee is degraded within seconds, before any incident exists', () => {
+    const before = ab(10_000, 20_000);
+    const now = ab(10_050, 20_000 + 50 * 300);
+    const t = buildTopology(snap([now]), [], warm, NOW, recentWindow(snap([now]), stateAt([before], NOW - 25_000), NOW));
+    const b = t.nodes.find((n) => n.id === 'b')!;
+    expect(b).toMatchObject({ status: 'healthy', degraded: true, recent_avg_ms: 300 });
+    expect(t.nodes.find((n) => n.id === 'a')!.degraded).toBe(false);
+  });
+
+  test('just after a scorer run the window is topped up with its last full window', () => {
+    const before = ab(1_000, 2_000);
+    const now = ab(1_003, 2_000 + 3 * 2);
+    const state = stateAt([before], NOW - 4_000, { lastWindow: [{ um: 'a', dm: 'b', calls: 60, sumMs: 60 * 300 }], lastWindowMs: 60_000 });
+    const recent = recentWindow(snap([now]), state, NOW)!;
+    expect(recent.ms).toBe(64_000);
+    const t = buildTopology(snap([now]), [], warm, NOW, recent);
+    expect(t.edges[0].recent_calls).toBe(63);
+    expect(t.edges[0].recent_avg_latency_ms).toBeCloseTo((60 * 300 + 6) / 63, 3);
+    // a long enough window is NOT topped up
+    expect(recentWindow(snap([now]), { ...state, updatedMs: NOW - MIN_RECENT_WINDOW_MS }, NOW)!.ms).toBe(MIN_RECENT_WINDOW_MS);
+  });
+
+  test('few calls are not enough to call a service degraded', () => {
+    const before = ab(1_000, 2_000);
+    const now = ab(1_000 + RECENT_MIN_CALLS - 1, 2_000 + (RECENT_MIN_CALLS - 1) * 300);
+    const t = buildTopology(snap([now]), [], warm, NOW, recentWindow(snap([now]), stateAt([before], NOW - 30_000), NOW));
+    expect(t.nodes.find((n) => n.id === 'b')!.degraded).toBe(false);
+  });
+
+  test('no window: no scorer state, an empty one, or a graph reset (counters went down)', () => {
+    const now = ab(100, 200);
+    expect(recentWindow(snap([now]), undefined, NOW)).toBeUndefined();
+    expect(recentWindow(snap([now]), stateAt([], NOW - 30_000), NOW)).toBeUndefined();
+    expect(recentWindow(snap([now]), stateAt([ab(500, 1000)], NOW - 30_000), NOW)).toBeUndefined();
+    const t = buildTopology(snap([now]), [], warm, NOW, undefined);
+    expect(t.recent_window_ms).toBeNull();
+    expect(t.edges[0]).toMatchObject({ recent_calls: 0, recent_avg_latency_ms: null });
+    expect(t.nodes.every((n) => n.recent_avg_ms === null && n.degraded === false)).toBe(true);
+  });
+
+  test('an idle edge has 0 recent calls and a null recent average, never NaN', () => {
+    const before = [ab(100, 200), { ...ab(10, 20), dm: 'c' }];
+    const now = [ab(150, 300), { ...ab(10, 20), dm: 'c' }];
+    const t = buildTopology(snap(now), [], warm, NOW, recentWindow(snap(now), stateAt(before, NOW - 30_000), NOW));
+    expect(t.edges.find((e) => e.target === 'c')).toMatchObject({ recent_calls: 0, recent_avg_latency_ms: null });
+    expect(t.nodes.find((n) => n.id === 'c')!.recent_avg_ms).toBeNull();
+  });
+});
+
 describe('GET /api/topology', () => {
   const state: ScorerState = {
     version: 3,
@@ -183,7 +257,12 @@ describe('GET /api/topology', () => {
   });
 
   test('matches the golden file the dashboard reads', async () => {
-    const graph = await boutique();
+    // Two healthy minutes, the scorer's snapshot 30 s ago, then a slow productcatalogservice.
+    const graph = new FakeGraph();
+    graph.advance(50);
+    graph.advance(50);
+    const counters = (await graph.read()).edges;
+    graph.advance(50, { productcatalogservice: 6 });
     const doc = new FakeDoc();
     doc.items = [
       incident({
@@ -193,8 +272,13 @@ describe('GET /api/topology', () => {
         at_risk: ['frontend', 'recommendationservice', 'checkoutservice'],
       }),
     ];
-    const res = await handleTopology(event('/api/topology'), apiDeps({ graph, doc, state }));
+    const res = await handleTopology(
+      event('/api/topology'),
+      apiDeps({ graph, doc, state: { ...state, counters, updatedMs: NOW - 30_000 } }),
+    );
     const actual = JSON.parse(res.body);
+    expect(actual.recent_window_ms).toBe(30_000);
+    expect(actual.nodes.find((n: { id: string }) => n.id === 'productcatalogservice')).toMatchObject({ degraded: true, recent_avg_ms: 60 });
     if (process.env.UPDATE_GOLDEN === '1') {
       fs.mkdirSync(path.dirname(GOLDEN), { recursive: true });
       fs.writeFileSync(GOLDEN, JSON.stringify(actual, null, 2) + '\n');
