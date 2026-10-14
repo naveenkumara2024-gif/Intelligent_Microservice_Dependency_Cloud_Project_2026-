@@ -7,6 +7,7 @@ import { NeptuneStack } from '../lib/neptune-stack';
 import { DynamodbStack } from '../lib/dynamodb-stack';
 import { SagemakerStack } from '../lib/sagemaker-stack';
 import { FrontendStack } from '../lib/frontend-stack';
+import { ApiStack } from '../lib/api-stack';
 import { TransformerStack } from '../lib/transformer-stack';
 import { ScorerStack } from '../lib/scorer-stack';
 import { AlertingStack } from '../lib/alerting-stack';
@@ -29,7 +30,6 @@ const neptuneStack = new NeptuneStack(app, 'NeptuneStack', {
 });
 const dynamodbStack = new DynamodbStack(app, 'DynamodbStack', { env });
 const sagemakerStack = new SagemakerStack(app, 'SagemakerStack', { env });
-const frontendStack = new FrontendStack(app, 'FrontendStack', { env });
 // `-c graphBackend=neptune` points the transformer at Neptune (IAM auth); the default logs the
 // upserts, so Stage 8b can be deployed and verified without Neptune (and its cost).
 const graphBackend = String(app.node.tryGetContext('graphBackend') ?? 'log');
@@ -58,6 +58,28 @@ const scorerStack = new ScorerStack(app, 'ScorerStack', {
   tableKey: dynamodbStack.key,
 });
 
+// Stage 13: the dashboard's read-only API, and the site. `-c topology=neptune` adds the in-VPC
+// topology Lambda (and the VPC/Neptune dependency); the default serves incidents from DynamoDB
+// alone and answers /api/topology with 503. ApiStack is separate from FrontendStack so the API can
+// be deployed without CloudFront (which this account could not create before AWS Support verified
+// it); `npm run dashboard:local` then serves the SPA locally against the deployed API.
+const topologyBackend = String(app.node.tryGetContext('topology') ?? 'none');
+if (topologyBackend !== 'none' && topologyBackend !== 'neptune') {
+  throw new Error(`Unknown topology "${topologyBackend}" (expected "none" or "neptune")`);
+}
+const apiStack = new ApiStack(app, 'ApiStack', {
+  env,
+  incidentsTable: dynamodbStack.incidentsTable,
+  stateTable: dynamodbStack.stateTable,
+  tableKey: dynamodbStack.key,
+  topology: topologyBackend === 'neptune' ? { vpc: vpcStack.vpc, neptune: neptuneTarget } : undefined,
+});
+const frontendStack = new FrontendStack(app, 'FrontendStack', {
+  env,
+  api: apiStack.api,
+  originSecret: apiStack.originSecret,
+});
+
 // Stage 12: incident alerts. Needs only the incidents table's stream, so it deploys and verifies
 // without EKS/MSK/Neptune/SageMaker. `-c alertEmail=<addr>` adds an SNS email subscription (the
 // recipient confirms it once); `-c dashboardUrl=<url>` adds a link to messages (until Stage 13).
@@ -84,3 +106,9 @@ if (graphBackend === 'neptune') {
 scorerStack.addStackDependency(neptuneStack);
 scorerStack.addStackDependency(dynamodbStack);
 alertingStack.addStackDependency(dynamodbStack);
+apiStack.addStackDependency(dynamodbStack);
+if (topologyBackend === 'neptune') {
+  apiStack.addStackDependency(vpcStack);
+  apiStack.addStackDependency(neptuneStack);
+}
+frontendStack.addStackDependency(apiStack);
