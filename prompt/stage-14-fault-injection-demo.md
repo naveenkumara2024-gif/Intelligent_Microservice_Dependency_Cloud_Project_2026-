@@ -1,6 +1,6 @@
 # Stage 14 — End-to-end fault-injection demo
 
-Status: **APPROVED 2026-10-13 with all four recommendations (both faults, the API split, storefront private, Stage 13 committed first). Phase 14a COMPLETE (local, no AWS). Phase 14b (live) NOT yet run: it needs the full stack set deployed by you. See "Phase 14a as built" at the end.**
+Status: **APPROVED 2026-10-13 with all four recommendations (both faults, the API split, storefront private, Stage 13 committed first). Phase 14a COMPLETE (local, no AWS). Phase 14b latency fault VERIFIED LIVE 2026-10-14 (19/19); CPU fault at 15m never reached traffic. See "Phase 14b as run" at the end.**
 - Spans flowing; soak produced 0 incidents and 0 model calls after warm-up.
 - After the fault: the slowed edges' window latency rises in Neptune (read through the probe),
   the scorer's gate fires, the model is called.
@@ -103,3 +103,35 @@ Deviations and notes:
    Then I run `npm run verify:demo` (latency fault) and, if it passes,
    `npm run verify:demo -- --fault=cpu --service=currencyservice`.
 3. Teardown afterwards, in the usual order, with `npx tsx scripts/pre-destroy.ts` first.
+
+## Phase 14b as run (2026-10-14)
+
+Pre-flight: budget alert "My Monthly Cost Budget" ($50, $5.55 spent); **Lambda concurrency now 1000**
+(the 13b blocker is gone); MSK reachable. You deployed all 9 stacks (dashboard stacks added later);
+`verify:eks` 4/4, `verify:live` 8/8 (14 edges, about 1,700 calls/min).
+
+**Latency fault, `npm run verify:demo`: 19 PASS / 0 FAIL / 0 WARN.**
+- Warm-up: productcatalogservice baseline 0.38 ms over 18 windows. Soak 8 min: 0 model calls, 0 open.
+- Fault: 0.37 ms (1,010 calls/min) -> 302 ms (665 calls/min), x819; throughput fell but stayed far
+  above the 20-call minimum (the 100 ms fallback was not needed).
+- Incident `1791995781541-productcatalogservice` opened 0.6 min after rollout; root cause
+  productcatalogservice **rank #1, score 0.932** (peak 0.932, then 0.917), 2nd recommendationservice
+  0.083. Evidence: productcatalogservice own_delta 98.7, recommendationservice own_delta 38.9 (2.4 ->
+  96.5 ms because it calls productcatalog) = blast radius; at risk checkout/frontend/recommendation.
+- Cleared at 16:38:25; resolved 3.9 min later (4 windows). Alerts opened=1, resolved=1; SNS 3
+  delivered / 0 failed; DLQ 0; no scorer errors; deployment back to manifest values.
+
+**CPU fault, `npm run verify:demo -- --fault=cpu --service=currencyservice`: did not reach traffic.**
+Warm-up and soak passed (baseline 1.39 ms, 0 model calls). At a 15m limit the new pod failed its
+1 s gRPC readiness and liveness probes (`failed to connect service ":7000" within 1s`), was restarted,
+never became Ready; the rolling update kept the old 200m pod serving, so latency never changed and
+no incident opened (correct). The rollout timed out and the run cleaned up. Findings: 15m is too
+severe for a probe-checked Node.js service (try 50m); the verifier should say "fault never reached
+traffic" rather than "no window data"; and the CPU run's cleanup also listed the already-cleared
+productcatalog latency entry (harmless, the cluster was clean; worth a look).
+
+**Dashboard finding (fixed in code, not yet deployed):** during the session the live topology still
+showed `frontend -> productcatalogservice avg = 46 ms` 40 minutes after the fault was cleared (real
+latency 0.4 ms): the labels were lifetime averages, and node colour only changes when an incident
+opens. The API now derives a recent window from the scorer's stored counters (see CLAUDE.md, Stage 14).
+Lambda 289 (+7), dashboard 50 (+4), infra 232 tests green; `cdk synth` clean.
