@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { AlertingStack } from '../lib/alerting-stack';
+import { AlertingStack, parseAlertEmails } from '../lib/alerting-stack';
 import { DynamodbStack } from '../lib/dynamodb-stack';
 import {
   ALERT_DLQ_NAME,
@@ -15,7 +15,7 @@ import {
 
 const env = { account: '111122223333', region: 'us-east-1' };
 
-function build(props: { alertEmail?: string; dashboardUrl?: string } = {}) {
+function build(props: { alertEmails?: string[]; dashboardUrl?: string } = {}) {
   const app = new cdk.App();
   const dynamodbStack = new DynamodbStack(app, 'TestDynamodbStack', { env });
   const stack = new AlertingStack(app, 'TestAlertingStack', { env, incidentsTable: dynamodbStack.incidentsTable, ...props });
@@ -148,9 +148,22 @@ describe('AlertingStack: topic and subscribers', () => {
   });
 
   test('an email subscription exists only when an address is configured', () => {
-    const withEmail = build({ alertEmail: 'oncall@example.com' }).template;
+    const withEmail = build({ alertEmails: ['oncall@example.com'] }).template;
     withEmail.hasResourceProperties('AWS::SNS::Subscription', { Protocol: 'email', Endpoint: 'oncall@example.com' });
     expect(Object.values(withEmail.findResources('AWS::SNS::Subscription'))).toHaveLength(3);
+  });
+
+  test('one email subscription per address; the logical id follows the address, not its position', () => {
+    const emailIds = (alertEmails: string[]) => {
+      const subs = build({ alertEmails }).template.findResources('AWS::SNS::Subscription', { Properties: { Protocol: 'email' } });
+      return Object.fromEntries(Object.entries(subs).map(([id, s]) => [s.Properties.Endpoint, id]));
+    };
+    const two = emailIds(['a@example.com', 'b@example.com']);
+    expect(Object.keys(two).sort()).toEqual(['a@example.com', 'b@example.com']);
+    // Reordering keeps each subscription's id, so a redeploy would replace nothing.
+    expect(emailIds(['b@example.com', 'a@example.com'])).toEqual(two);
+    // The first address keeps the id it had when only one address was supported.
+    expect(emailIds(['a@example.com'])['a@example.com']).toBe(two['a@example.com']);
   });
 
   test('the dashboard link reaches the functions only when configured', () => {
@@ -221,5 +234,24 @@ describe('AlertingStack: dead-letter queue and teardown', () => {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
     expect(() => new AlertingStack(app, 'Bad', { env, incidentsTable: noStream })).toThrow(/needs an incidents table with a stream/);
+  });
+});
+
+describe('parseAlertEmails', () => {
+  test('one address, a list, blanks and spaces', () => {
+    expect(parseAlertEmails('oncall@example.com')).toEqual(['oncall@example.com']);
+    expect(parseAlertEmails(' a@example.com , b@example.org,, ')).toEqual(['a@example.com', 'b@example.org']);
+    expect(parseAlertEmails(undefined)).toEqual([]);
+    expect(parseAlertEmails('')).toEqual([]);
+  });
+
+  test('duplicates are dropped ignoring case, keeping the first spelling', () => {
+    expect(parseAlertEmails('A@example.com,a@example.com,b@example.com')).toEqual(['A@example.com', 'b@example.com']);
+  });
+
+  test('anything that is not an address fails loudly', () => {
+    expect(() => parseAlertEmails('a@example.com;b@example.com')).toThrow(/Not an email address/);
+    expect(() => parseAlertEmails('oncall')).toThrow(/"oncall"/);
+    expect(() => parseAlertEmails('a@example.com b@example.com')).toThrow(/Not an email address/);
   });
 });
