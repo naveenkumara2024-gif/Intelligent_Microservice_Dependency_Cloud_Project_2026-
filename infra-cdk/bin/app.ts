@@ -10,7 +10,7 @@ import { FrontendStack } from '../lib/frontend-stack';
 import { ApiStack } from '../lib/api-stack';
 import { TransformerStack } from '../lib/transformer-stack';
 import { ScorerStack } from '../lib/scorer-stack';
-import { AlertingStack } from '../lib/alerting-stack';
+import { AlertingStack, parseAlertEmails } from '../lib/alerting-stack';
 
 // Region is pinned (CLAUDE.md: us-east-1). The account comes from the CDK CLI
 // (CDK_DEFAULT_ACCOUNT, resolved from credentials); it is undefined when
@@ -81,12 +81,13 @@ const frontendStack = new FrontendStack(app, 'FrontendStack', {
 });
 
 // Stage 12: incident alerts. Needs only the incidents table's stream, so it deploys and verifies
-// without EKS/MSK/Neptune/SageMaker. `-c alertEmail=<addr>` adds an SNS email subscription (the
-// recipient confirms it once); `-c dashboardUrl=<url>` adds a link to messages (until Stage 13).
+// without EKS/MSK/Neptune/SageMaker. `-c alertEmail=<addr>[,<addr>...]` adds one SNS email
+// subscription per address (each recipient confirms their own); `-c dashboardUrl=<url>` adds a link
+// to messages (until Stage 13).
 const alertingStack = new AlertingStack(app, 'AlertingStack', {
   env,
   incidentsTable: dynamodbStack.incidentsTable,
-  alertEmail: app.node.tryGetContext('alertEmail') ? String(app.node.tryGetContext('alertEmail')) : undefined,
+  alertEmails: parseAlertEmails(app.node.tryGetContext('alertEmail') ? String(app.node.tryGetContext('alertEmail')) : undefined),
   dashboardUrl: app.node.tryGetContext('dashboardUrl') ? String(app.node.tryGetContext('dashboardUrl')) : undefined,
 });
 

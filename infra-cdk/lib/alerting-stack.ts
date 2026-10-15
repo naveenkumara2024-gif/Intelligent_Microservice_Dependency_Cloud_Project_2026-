@@ -30,10 +30,36 @@ import {
 export interface AlertingStackProps extends cdk.StackProps {
   /** Must have a stream with NEW_AND_OLD_IMAGES (DynamodbStack). */
   readonly incidentsTable: dynamodb.ITable;
-  /** Optional SNS email subscription (`-c alertEmail=...`); the recipient has to confirm it once. */
-  readonly alertEmail?: string;
+  /**
+   * Optional SNS email subscriptions, one per address (`-c alertEmail=a@x.com,b@y.com`, parsed by
+   * `parseAlertEmails`); each recipient has to confirm their own subscription once per deploy.
+   */
+  readonly alertEmails?: readonly string[];
   /** Optional link rendered in messages until Stage 13 provides the dashboard (`-c dashboardUrl=...`). */
   readonly dashboardUrl?: string;
+}
+
+const EMAIL_PATTERN = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+
+/**
+ * Parses the alert email setting (`-c alertEmail=`, `RCA_ALERT_EMAIL`): one address or a
+ * comma-separated list. Blank entries are skipped, duplicates (ignoring case) dropped, and anything
+ * that does not look like an address throws, so a typo fails before anything deploys.
+ */
+export function parseAlertEmails(raw: string | undefined): string[] {
+  const seen = new Set<string>();
+  const addresses: string[] = [];
+  for (const part of (raw ?? '').split(',')) {
+    const address = part.trim();
+    if (!address) continue;
+    if (!EMAIL_PATTERN.test(address)) {
+      throw new Error(`Not an email address: "${address}" (expected one address or a comma-separated list)`);
+    }
+    if (seen.has(address.toLowerCase())) continue;
+    seen.add(address.toLowerCase());
+    addresses.push(address);
+  }
+  return addresses;
 }
 
 /**
@@ -41,7 +67,7 @@ export interface AlertingStackProps extends cdk.StackProps {
  *
  *   rca-incidents stream -> dispatcher Lambda -> SNS rca-alerts -> Slack Lambda
  *                                                               -> PagerDuty Lambda
- *                                                               -> email (optional)
+ *                                                               -> email (optional, one or more)
  *
  * None of the Lambdas is in the VPC: they touch no private resource, and Slack / PagerDuty are on
  * the public internet, so a VPC placement would only add a NAT dependency. Channel credentials are
@@ -204,8 +230,10 @@ export class AlertingStack extends cdk.Stack {
       this.topic.addSubscription(new subscriptions.LambdaSubscription(fn, { deadLetterQueue: this.deadLetterQueue }));
     }
 
-    if (props.alertEmail) {
-      this.topic.addSubscription(new subscriptions.EmailSubscription(props.alertEmail));
+    // The subscription's construct id is the address itself, so a single address synthesizes exactly
+    // as before multiple addresses were supported, and reordering the list replaces nothing.
+    for (const address of props.alertEmails ?? []) {
+      this.topic.addSubscription(new subscriptions.EmailSubscription(address));
     }
 
     new cdk.CfnOutput(this, 'TopicArn', { value: this.topic.topicArn });
