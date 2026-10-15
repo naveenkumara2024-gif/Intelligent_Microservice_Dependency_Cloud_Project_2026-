@@ -29,3 +29,6 @@ dataset/processed/
 
 # ML training artifacts (build output, regenerable via src/ml-engine/train.py)
 src/ml-engine/artifacts/
+
+# Office lock files (a document open in Word)
+~$*

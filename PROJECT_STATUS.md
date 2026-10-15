@@ -1,6 +1,6 @@
 # Project status — Intelligent Microservice Dependency Analysis & RCA Framework
 
-As of 2026-10-14. For the full detail see `CLAUDE.md` (architecture and per-stage notes) and
+As of 2026-10-15. For the full detail see `CLAUDE.md` (architecture and per-stage notes) and
 `prompt/stage-NN-*.md` (the plan and as-built record of each stage).
 
 ## What the system does
@@ -31,10 +31,11 @@ Online Boutique on EKS -> OTel Collector -> MSK (Kafka) -> Lambda transformer ->
 | 10 | SageMaker serverless GNN endpoint | Verified live |
 | 11 | DynamoDB incidents + scorer Lambda | Verified live |
 | 12 | SNS alerting (Slack / PagerDuty / email) | Verified live |
-| 13 | Dashboard (React + Cytoscape) + read-only API + CloudFront site | Tier 1 verified live; recent-window fix built locally |
+| 13 | Dashboard (React + Cytoscape) + read-only API + CloudFront site | Verified live, including tier 2 (topology) and the recent-window fix (2026-10-15) |
 | 14 | **Real fault-injection demo** | **14b latency fault verified live 19/19 (2026-10-14)**; CPU fault not detectable as designed (see below) |
+| 15 | One-command `npm run up` / `npm run down` (parallel deploy and teardown) | `up` verified live in ~41 min (2026-10-15); first `down` in progress at commit time |
 
-Tests passing: 289 unit (Lambdas), 50 (dashboard), 232 (infra), 51 (Python). Full `cdk synth` clean (11 stacks).
+Tests passing: 289 unit (Lambdas), 50 (dashboard), 257 (infra), 51 (Python). Full `cdk synth` clean (11 stacks).
 
 ## Stage 14b result (2026-10-14, live, real fault, real traffic)
 
@@ -51,21 +52,17 @@ detect, so no incident (correctly). A milder limit (e.g. 50m) is untested.
 
 ## In progress / not yet done
 
-- **Dashboard recent-window fix** (built and tested locally, NOT deployed): the graph showed lifetime
-  average latency, which hid a fault and kept showing it long after (46 ms shown 40 min after the fault
-  was cleared). It now shows the last 20-80 s and a "Slow now" marker; needs `deploy:scorer` and
-  `deploy:frontend -- -c topology=neptune`, then a live check.
-- **13b tier 2** (topology through CloudFront) served real Neptune data during 14b, but the formal
-  `verify:dashboard -- --topology` has not been run; re-run the 19/1 tier-1 check now that the
-  concurrency limit is 1000.
-- **Nothing pushed since `8769cdc`.**
+- **Final report drafted** (`Docs/AWS_Cloud_Project_Report_Final.docx` + PDF, 64 pages): 37 `[TO CONFIRM]` items
+  for the team (third member, team number, year, date, contributions, student A/B/C names, AI-assistance wording,
+  teardown result). Rebuild with `Docs/report-build/build_report.py`.
+- **Stage 15 `down`:** the first live run was in progress when committed; confirm with `npm run verify:teardown`.
+- **Nothing pushed** since `010c4f1`.
 
 ## Next steps, in order
 
-1. Deploy and live-check the dashboard fix; run `verify:dashboard -- --topology`.
+1. Fill the report's `[TO CONFIRM]` items and rebuild; confirm the teardown and record T19 / Objective 6.
 2. Optional: CPU fault at `--limit=50m`; set the Slack webhook and PagerDuty key (SSM) and re-run
    `verify:alerts` to prove the real HTTP legs (only unit-tested so far).
-3. **Stage 15 — teardown discipline:** `cdk destroy` idle stacks between sessions.
 
 ## Things to remember
 
@@ -77,4 +74,5 @@ detect, so no incident (correctly). A milder limit (e.g. 50m) is untested.
   default CloudFront certificate.
 - **Unproven so far:** SSM secret decryption and real Slack/PagerDuty delivery.
 - **Shell tips (Windows):** use PowerShell for `aws ssm put-parameter` (Git Bash rewrites paths that
-  start with `/`); repeat `-c alertEmail=...` on every `deploy:alerts` or the email subscription is removed.
+  start with `/`); repeat `-c alertEmail=...` on every `deploy:alerts` or the email subscription is removed
+  (`npm run up` takes it from `infra-cdk/.env`, `RCA_ALERT_EMAIL`, comma-separated for several people).
