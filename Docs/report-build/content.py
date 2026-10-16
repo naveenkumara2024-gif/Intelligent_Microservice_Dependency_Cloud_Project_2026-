@@ -9,7 +9,7 @@ TITLE = 'Intelligent Microservice Dependency Analysis Framework for Online Shopp
 REPO = 'https://github.com/naveenkumara2024-gif/Intelligent_Microservice_Dependency_Cloud_Project_2026-'
 
 COVER = {
-    'Submitted by:': 'Submitted by: Naveen Kumar (24BIT0443), Kabilesh SN (24BIT0464), [TO CONFIRM: third member name and register number]',
+    'Submitted by:': 'Submitted by: Naveen Kumar (24BIT0443), Kabilesh SN (24BIT0464), Nagulesh (24BIT0482)',
     'Programme / Branch / Year:': 'Programme / Branch / Year: B.Tech. Information Technology, [TO CONFIRM: year]',
     'Team Number:': 'Team Number: [TO CONFIRM: team number]',
     'GitHub Repository:': f'GitHub Repository: {REPO}',
@@ -127,7 +127,7 @@ LIT_SYNTHESIS = [
     ('pl', 'Trends and conflicts. The trends are towards multi-source data (P5, P6), online operation (P6), tolerance of missing telemetry (P5) and lighter models (P2). The papers disagree on two points: single-metric simplicity (P2) against multi-modal fusion (P6), and LLM reasoning (P8, P9) against learned graph models (P4, P7) when cost and latency matter. Common limitations are offline evaluation, heavy computation, dependence on historical fault records or expert-built graphs, and detection without localisation (P7, P13).'),
 ]
 GAP_INTRO = [
-    ('p', 'Each student analysed the papers assigned to them in Phase I: Student A papers P1–P5 (telemetry and tracing), Student B papers P6–P10 (knowledge graphs in cloud operations) and Student C papers P11–P15 (AI-driven anomaly detection). The table records each paper\'s method, advantages and limitations and the gap and improvement identified by the student. The rows were checked against the papers in October 2026 and corrected where the Phase-I notes did not match the paper. [TO CONFIRM: the names of Students A, B and C, and each student\'s review of their rows.]'),
+    ('p', 'Each student analysed the papers assigned to them in Phase I: Student A papers P1–P5 (telemetry and tracing), Student B papers P6–P10 (knowledge graphs in cloud operations) and Student C papers P11–P15 (AI-driven anomaly detection). The table records each paper\'s method, advantages and limitations and the gap and improvement identified by the student. The rows were checked against the papers in October 2026 and corrected where the Phase-I notes did not match the paper. Student A is Naveen Kumar, Student B Kabilesh SN and Student C Nagulesh. [TO CONFIRM: each student\'s review of their rows.]'),
 ]
 GAP_ROWS = [
     ['P1 (A)', 'Causal graph + LLM reasoning', 'Automated, interpretable diagnostic chain', 'Graph built from expert dependencies and statistics; eight controlled scenarios', 'The dependency graph should be discovered from live data, not authored by experts', 'Derive the graph continuously from traces'],
@@ -480,10 +480,10 @@ RISK_ROWS = [
 # --------------------------------------------------------------------------------------------
 # Chapter 12
 TEAM_INTRO = [('p', 'The table records each member\'s individual work. Entries supported by Git history are filled in; the remaining entries are to be completed by the team. [TO CONFIRM: all contributions.]')]
-TEAM_HEADER = ['Activity', 'Naveen Kumar (24BIT0443)', 'Kabilesh SN (24BIT0464)', '[TO CONFIRM: Student 3]']
+TEAM_HEADER = ['Activity', 'Naveen Kumar (24BIT0443)', 'Kabilesh SN (24BIT0464)', 'Nagulesh (24BIT0482)']
 TEAM_ROWS = [
-    ['Literature survey and assigned paper analysis', '[TO CONFIRM: papers]', '[TO CONFIRM: papers]', '[TO CONFIRM: papers]'],
-    ['Research gap and novelty', '[TO CONFIRM]', '[TO CONFIRM]', '[TO CONFIRM]'],
+    ['Literature survey and assigned paper analysis', 'P1–P5: telemetry and tracing (survey entries and individual analysis)', 'P6–P10: knowledge graphs in cloud operations (survey entries and individual analysis)', 'P11–P15: AI-driven anomaly detection (survey entries and individual analysis)'],
+    ['Research gap and novelty', 'Gap: no engine turns flat trace spans into live graph nodes; proposed a streaming MSK + Lambda layer feeding a graph database', 'Gap: operations knowledge graphs lack automatic schema discovery and live latency-weighted edges; proposed Neptune\'s schema-less property graph', 'Gap: monitoring models rarely combine temporal data with graph structure; proposed a GNN on SageMaker trained on the graph topology'],
     ['Frontend / application', 'Stage-13 dashboard (React, Cytoscape.js) and API', 'Early frontend work (Aug 2026): implementation merged in PR #3, then a React/TypeScript prototype with dashboard, dependency-graph and services pages on branch frontend', '[TO CONFIRM]'],
     ['Backend / APIs / database', 'Graph transformer, scorer, DynamoDB incident store, dashboard API', '[TO CONFIRM]', '[TO CONFIRM]'],
     ['AWS services and security', 'CDK stacks (Stages 4–15), VPC, EKS, MSK, Neptune, SageMaker, SNS, CloudFront; IAM and KMS design', '[TO CONFIRM]', '[TO CONFIRM]'],
@@ -499,7 +499,7 @@ EVIDENCE = [
     ('b', [
         'Naveen Kumar – GitHub naveenkumara2024-gif; 53 commits across all branches (repository set-up, Stages 0–15, merges of pull requests #1–#9).',
         'Kabilesh SN – GitHub Kabilesh010; 8 commits on the backend and frontend branches (18–23 August 2026): an early frontend implementation, merged through pull request #3 on 18 August, and a React/TypeScript frontend prototype with dashboard, dependency-graph and services pages on the frontend branch (not merged into main; the Stage-13 dashboard later replaced it).',
-        '[TO CONFIRM: Student 3 – GitHub username, commits, pull requests and reviews.]',
+        'Nagulesh – [TO CONFIRM: GitHub username, commits, pull requests and reviews.]',
         'Commit counts are taken from git shortlog on 15 October 2026 and are reported as they are, including where they fall below the guideline of 20–30 commits per student. [TO CONFIRM: code-review participation.]',
     ]),
 ]
@@ -560,8 +560,8 @@ REFERENCES = [
 # Appendix A (actual dates from Git history and stage records)
 TIMELINE_HEADER = ['Phase / task', 'Start', 'End', 'Owner(s)', 'Status / evidence']
 TIMELINE_ROWS = [
-    ['Literature survey', 'Jul 2026', 'Aug 2026', '[TO CONFIRM]', 'Complete; Phase-I report; citations re-verified Oct 2026'],
-    ['Research gap and novelty', 'Jul 2026', 'Aug 2026', '[TO CONFIRM]', 'Complete; Phase-I novelty summary; revised framing (Chapter 4)'],
+    ['Literature survey', 'Jul 2026', 'Aug 2026', 'All three (five papers each)', 'Complete; Phase-I report; citations re-verified Oct 2026'],
+    ['Research gap and novelty', 'Jul 2026', 'Aug 2026', 'All three (five papers each)', 'Complete; Phase-I novelty summary; revised framing (Chapter 4)'],
     ['Architecture design', '30 Jul 2026', '30 Jul 2026', '[TO CONFIRM]', 'Phase-I diagrams; as-built diagrams Oct 2026 (Figures {F:aws}, {F:system})'],
     ['Dataset, local graph and GNN (Stages 0–3)', '21 Sep 2026', '22 Sep 2026', 'Naveen Kumar', 'Complete; pull requests #4 and #6'],
     ['Infrastructure as code and networking (Stages 4–5)', '21 Sep 2026', '6 Oct 2026', 'Naveen Kumar', 'Complete; pull request #5; verify:vpc'],
