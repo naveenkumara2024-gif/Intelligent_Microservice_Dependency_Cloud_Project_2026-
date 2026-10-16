@@ -1,0 +1,79 @@
+diff --git a/infra-cdk/scripts/demo-live.ts b/infra-cdk/scripts/demo-live.ts
+index 642b90f..04566c0 100644
+--- a/infra-cdk/scripts/demo-live.ts
++++ b/infra-cdk/scripts/demo-live.ts
+@@ -97,7 +97,10 @@ export function evaluateDemo(o: DemoObservation): Check[] {
+     ratio !== undefined && ratio >= MIN_LATENCY_RATIO,
+     before && during
+       ? `${before.avgMs.toFixed(2)} ms (${before.calls} calls) -> ${during.avgMs.toFixed(2)} ms (${during.calls} calls), x${ratio!.toFixed(1)}`
+-      : `no window data (before=${!!before}, during=${!!during}): the service received no calls in a window`,
++      : `no window data (before=${!!before}, during=${!!during}): ` +
++        (!during && /^cpu(?:\s|$)/.test(f.description)
++          ? 'the faulted pod may never have become Ready (CPU limit too low for its probes); the old pod may have kept serving, so no slowdown reached traffic. Try a higher --limit.'
++          : 'the service received no calls in a window'),
+   );
+ 
+   // Opening ------------------------------------------------------------------------------------
+diff --git a/infra-cdk/scripts/verify-dashboard.ts b/infra-cdk/scripts/verify-dashboard.ts
+index 10320d8..bf36333 100644
+--- a/infra-cdk/scripts/verify-dashboard.ts
++++ b/infra-cdk/scripts/verify-dashboard.ts
+@@ -13,6 +13,7 @@
+ // rca-incidents and deletes them again (they also carry a 1 h TTL). It sends a short burst of
+ // requests to observe throttling, which is deliberately within the stage's limits.
+ import { INCIDENTS_TABLE, INCIDENT_KEY } from '../../src/lambda-transformer/src/scorer/schema';
++import { TOPOLOGY_CACHE_SECONDS } from '../../src/lambda-transformer/src/api/names';
+ import { incidentIdOf, incidentItem } from './alerts-live';
+ import { aws, awsJson, Check, report } from './aws-cli';
+ import { ddb, sleepMs } from './ddb-cli';
+@@ -286,10 +287,10 @@ async function checkApi() {
+         detail: topo ? `HTTP ${topo.status}, ${t?.nodes?.length ?? 0} nodes, ${t?.edges?.length ?? 0} edges` : 'no response',
+       });
+       add({
+-        name: 'The topology is cacheable for 10 s, and a second call is served from CloudFront',
+-        ok: topo?.headers.get('cache-control') === 'public, max-age=10',
++        name: `The topology is cacheable for ${TOPOLOGY_CACHE_SECONDS} s`,
++        ok: topo?.headers.get('cache-control') === `public, max-age=${TOPOLOGY_CACHE_SECONDS}`,
+         detail: `cache-control=${topo?.headers.get('cache-control')}`,
+-        warn: topo?.headers.get('cache-control') !== 'public, max-age=10',
++        warn: topo?.headers.get('cache-control') !== `public, max-age=${TOPOLOGY_CACHE_SECONDS}`,
+       });
+       const again = await get(`${site}/api/topology`);
+       if (!apiOnly) add({
+diff --git a/infra-cdk/test/demo-live.test.ts b/infra-cdk/test/demo-live.test.ts
+index 33d11be..d988483 100644
+--- a/infra-cdk/test/demo-live.test.ts
++++ b/infra-cdk/test/demo-live.test.ts
+@@ -93,6 +93,32 @@ describe('evaluateDemo', () => {
+     expect(failures(o).some((n) => n.startsWith('The fault is visible in the graph'))).toBe(true);
+   });
+ 
++  test('a CPU fault with no during window explains the likely readiness failure and stays FAIL', () => {
++    const o = good();
++    o.fault.service = 'currencyservice';
++    o.fault.description = 'cpu --service=currencyservice --limit=15m';
++    o.latency.during = undefined;
++    const check = evaluateDemo(o).find((c) => c.name.startsWith('The fault is visible in the graph'))!;
++    expect(verdict(o)[check.name]).toBe('FAIL');
++    expect(check.detail).toContain('before=true, during=false');
++    expect(check.detail).toContain('may never have become Ready (CPU limit too low for its probes)');
++    expect(check.detail).toContain('the old pod may have kept serving, so no slowdown reached traffic');
++    expect(check.detail).toContain('Try a higher --limit.');
++  });
++
++  test.each([
++    ['latency --delay=300ms', 'during'],
++    ['cpu --service=currencyservice --limit=15m', 'before'],
++  ] as const)('%s missing only %s keeps the generic missing-window message', (description, missing) => {
++    const o = good();
++    o.fault.description = description;
++    o.latency[missing] = undefined;
++    const check = evaluateDemo(o).find((c) => c.name.startsWith('The fault is visible in the graph'))!;
++    expect(verdict(o)[check.name]).toBe('FAIL');
++    expect(check.detail).toContain('the service received no calls in a window');
++    expect(check.detail).not.toContain('Ready');
++  });
++
+   test('opening too late fails; no incident at all fails', () => {
+     const late = good();
+     late.incidents = [incident({ opened_at_ms: T + 7 * WINDOW_MS })];
