@@ -1,0 +1,207 @@
+{
+  "nodes": [
+    {
+      "name": "adservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 22532,
+      "own_delta": 0
+    },
+    {
+      "name": "cartservice",
+      "total_calls_as_um": 232910,
+      "total_calls_as_dm": 284129,
+      "own_delta": 0
+    },
+    {
+      "name": "checkoutservice",
+      "total_calls_as_um": 1313476,
+      "total_calls_as_dm": 401619,
+      "own_delta": 1
+    },
+    {
+      "name": "currencyservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 5916,
+      "own_delta": 0
+    },
+    {
+      "name": "emailservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 463340,
+      "own_delta": 0
+    },
+    {
+      "name": "frontend",
+      "total_calls_as_um": 570589,
+      "total_calls_as_dm": 121705,
+      "own_delta": 0
+    },
+    {
+      "name": "loadgenerator",
+      "total_calls_as_um": 121705,
+      "total_calls_as_dm": 0,
+      "own_delta": 0
+    },
+    {
+      "name": "paymentservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 43643,
+      "own_delta": 3.1639999999999997
+    },
+    {
+      "name": "productcatalogservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 467938,
+      "own_delta": 0
+    },
+    {
+      "name": "recommendationservice",
+      "total_calls_as_um": 297627,
+      "total_calls_as_dm": 132732,
+      "own_delta": 0
+    },
+    {
+      "name": "redis-cart",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 232910,
+      "own_delta": 0
+    },
+    {
+      "name": "shippingservice",
+      "total_calls_as_um": 0,
+      "total_calls_as_dm": 359843,
+      "own_delta": 0
+    }
+  ],
+  "edges": [
+    {
+      "um": "cartservice",
+      "dm": "redis-cart",
+      "avg_latency_ms": 2.97,
+      "p95_latency_ms": 5,
+      "call_count": 232910,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "cartservice",
+      "avg_latency_ms": 0.604,
+      "p95_latency_ms": 1,
+      "call_count": 282204,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "currencyservice",
+      "avg_latency_ms": 0.675,
+      "p95_latency_ms": 1,
+      "call_count": 4653,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "emailservice",
+      "avg_latency_ms": 1.369,
+      "p95_latency_ms": 2,
+      "call_count": 463340,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "paymentservice",
+      "avg_latency_ms": 4.164,
+      "p95_latency_ms": 5,
+      "call_count": 43643,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "productcatalogservice",
+      "avg_latency_ms": 3.4,
+      "p95_latency_ms": 5,
+      "call_count": 161114,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "checkoutservice",
+      "dm": "shippingservice",
+      "avg_latency_ms": 23.365,
+      "p95_latency_ms": 50,
+      "call_count": 358522,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "adservice",
+      "avg_latency_ms": 11.149,
+      "p95_latency_ms": 20,
+      "call_count": 22532,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "cartservice",
+      "avg_latency_ms": 10.86,
+      "p95_latency_ms": 20,
+      "call_count": 1925,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "checkoutservice",
+      "avg_latency_ms": 7.432,
+      "p95_latency_ms": 10,
+      "call_count": 401619,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "currencyservice",
+      "avg_latency_ms": 1.801,
+      "p95_latency_ms": 2,
+      "call_count": 1263,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "productcatalogservice",
+      "avg_latency_ms": 0.871,
+      "p95_latency_ms": 1,
+      "call_count": 9197,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "recommendationservice",
+      "avg_latency_ms": 3.023,
+      "p95_latency_ms": 5,
+      "call_count": 132732,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "frontend",
+      "dm": "shippingservice",
+      "avg_latency_ms": 19.104,
+      "p95_latency_ms": 20,
+      "call_count": 1321,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "loadgenerator",
+      "dm": "frontend",
+      "avg_latency_ms": 30.507,
+      "p95_latency_ms": 50,
+      "call_count": 121705,
+      "rpctype": "rpc"
+    },
+    {
+      "um": "recommendationservice",
+      "dm": "productcatalogservice",
+      "avg_latency_ms": 2.003,
+      "p95_latency_ms": 5,
+      "call_count": 297627,
+      "rpctype": "rpc"
+    }
+  ],
+  "top_k": 5
+}

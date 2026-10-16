@@ -15,3 +15,20 @@ venv/
 node_modules/
 dist/
 build/
+
+# CDK
+cdk.out/
+
+# Env
+.env
+
+# Dataset (downloaded raw data exceeds GitHub's file size limit;
+# processed/ is regenerable via dataset/preprocess_traces.py)
+dataset/raw/
+dataset/processed/
+
+# ML training artifacts (build output, regenerable via src/ml-engine/train.py)
+src/ml-engine/artifacts/
+
+# Office lock files (a document open in Word)
+~$*

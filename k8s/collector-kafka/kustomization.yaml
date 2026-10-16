@@ -1,0 +1,29 @@
+# Overlay on src/collector (the Stage 6 collector): swaps in the Kafka-exporting config and gives
+# the DaemonSet the broker list. Requires the kafka-bootstrap ConfigMap in `observability`
+# (created by scripts/deploy-workloads.ts from `aws kafka get-bootstrap-brokers`).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../src/collector
+configMapGenerator:
+  - name: otel-collector-config
+    behavior: replace
+    files:
+      - otel-collector-config.yaml
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: otel-collector
+      spec:
+        template:
+          spec:
+            containers:
+              - name: otel-collector
+                env:
+                  - name: KAFKA_BROKERS
+                    valueFrom:
+                      configMapKeyRef:
+                        name: kafka-bootstrap
+                        key: brokers

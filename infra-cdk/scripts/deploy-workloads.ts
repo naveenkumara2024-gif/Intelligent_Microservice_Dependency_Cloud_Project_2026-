@@ -1,0 +1,98 @@
+// Stage 6b: point kubectl at the deployed cluster and apply the workloads.
+// Creates Kubernetes resources (billable only via the cluster already running).
+import { spawnSync } from 'node:child_process';
+import * as path from 'node:path';
+import { aws, ensureClusterAdmin, kubectl, kubectlApplyStdin, kubectlArgs, mskInfo, pinEksContext, REGION } from './aws-cli';
+
+const repoRoot = path.resolve(__dirname, '..', '..');
+
+function kubectlRun(args: string[]): void {
+  const full = kubectlArgs(args);
+  console.log(`> kubectl ${full.join(' ')}`);
+  const r = spawnSync('kubectl', full, { stdio: 'inherit' });
+  if (r.status !== 0) {
+    console.error(`kubectl failed (exit ${r.status})`);
+    process.exit(r.status ?? 1);
+  }
+}
+
+const cluster = pinEksContext();
+if (!cluster.name) {
+  console.error(cluster.error);
+  process.exit(1);
+}
+
+const kubeconfig = aws(['eks', 'update-kubeconfig', '--name', cluster.name]);
+if (!kubeconfig.ok) {
+  console.error(kubeconfig.stderr);
+  process.exit(1);
+}
+console.log(`kubeconfig updated for ${cluster.name} (${REGION})`);
+
+const admin = ensureClusterAdmin(cluster.name);
+if (!admin.principal) {
+  console.error(`Could not grant cluster-admin: ${admin.error}`);
+  process.exit(1);
+}
+console.log(`cluster-admin access entry present for ${admin.principal}`);
+
+// Access entries take a few seconds to propagate.
+let allowed = false;
+for (let attempt = 0; attempt < 12 && !allowed; attempt++) {
+  allowed = kubectl(['auth', 'can-i', '*', '*']).stdout.trim() === 'yes';
+  if (!allowed) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+  }
+}
+if (!allowed) {
+  console.error('kubectl is still not authorized after 60s; check the access entry in the EKS console.');
+  process.exit(1);
+}
+
+// Stage 7: when MSK is deployed, publish its brokers to the cluster, create the topics, and
+// use the Kafka-exporting collector. Without MSK, run the Stage 6 (debug-only) collector.
+const msk = mskInfo();
+if (msk.error) {
+  console.error(`MSK lookup failed: ${msk.error}`);
+  process.exit(1);
+}
+const kubectlSoft = (args: string[]) => kubectl(args);
+let collectorDir = path.join(repoRoot, 'src', 'collector');
+if (msk.deployed && msk.bootstrap) {
+  collectorDir = path.join(repoRoot, 'k8s', 'collector-kafka');
+  const brokers = msk.bootstrap.split(',');
+  kubectlRun(['apply', '-f', path.join(repoRoot, 'src', 'collector', 'namespace.yaml')]);
+  const applied = kubectlApplyStdin(
+    [
+      'apiVersion: v1',
+      'kind: ConfigMap',
+      'metadata:',
+      '  name: kafka-bootstrap',
+      '  namespace: observability',
+      'data:',
+      // `brokers` is a YAML list literal: the collector parses ${env:KAFKA_BROKERS} as YAML.
+      `  brokers: "[${brokers.join(',')}]"`,
+      `  bootstrap: "${msk.bootstrap}"`,
+      '',
+    ].join('\n'),
+  );
+  if (!applied.ok) {
+    console.error(applied.stderr);
+    process.exit(1);
+  }
+  console.log(`kafka-bootstrap ConfigMap applied (${brokers.length} brokers)`);
+  // Jobs are immutable, so remove any finished one before re-applying.
+  kubectlSoft(['-n', 'observability', 'delete', 'job', 'kafka-topics', '--ignore-not-found']);
+  kubectlRun(['apply', '-k', path.join(repoRoot, 'k8s', 'kafka-topics')]);
+  kubectlRun(['-n', 'observability', 'wait', '--for=condition=complete', 'job/kafka-topics', '--timeout=300s']);
+} else {
+  console.warn('MskStack is not deployed: deploying the Stage 6 collector (debug exporter only, no Kafka).');
+}
+
+// Collector first so the services' OTLP endpoint exists when they start.
+kubectlRun(['apply', '-k', collectorDir]);
+// The broker list is not part of the DaemonSet spec hash, so restart to pick up changes.
+kubectlRun(['-n', 'observability', 'rollout', 'restart', 'daemonset/otel-collector']);
+kubectlRun(['-n', 'observability', 'rollout', 'status', 'daemonset/otel-collector', '--timeout=300s']);
+kubectlRun(['apply', '-k', path.join(repoRoot, 'k8s', 'online-boutique')]);
+kubectlRun(['wait', '--for=condition=Available', 'deployment', '--all', '--timeout=600s']);

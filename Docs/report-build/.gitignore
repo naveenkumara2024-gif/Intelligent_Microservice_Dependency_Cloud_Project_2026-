@@ -1,0 +1,4 @@
+# Generated at build time: renderer jobs (absolute local paths) and screenshot crops
+figures/jobs.json
+figures/crops/
+__pycache__/

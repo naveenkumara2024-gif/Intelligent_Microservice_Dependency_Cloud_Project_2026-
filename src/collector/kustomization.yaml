@@ -1,0 +1,12 @@
+# Apply with `kubectl apply -k src/collector`. The ConfigMap is generated from
+# otel-collector-config.yaml so the config stays a plain, editable collector file.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: observability
+resources:
+  - namespace.yaml
+  - collector.yaml
+configMapGenerator:
+  - name: otel-collector-config
+    files:
+      - otel-collector-config.yaml
