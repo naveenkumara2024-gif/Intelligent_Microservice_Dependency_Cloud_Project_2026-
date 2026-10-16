@@ -1,10 +1,10 @@
-// Makes the Online Boutique storefront reachable from the internet (an internet-facing NLB in the
-// public subnets), or private again with --off. Needs the EKS stack running and a paid-plan
-// account (the Free Tier plan refused to create load balancers).
+// Makes the Online Boutique storefront reachable from the internet (an internet-facing Classic ELB
+// in the public subnets), or private again with --off. Uses a Classic ELB because this AWS account
+// refuses Network Load Balancers (NLBs) with OperationNotPermitted.
 //
 //   npm run expose:storefront                        # open to everyone, plain HTTP
 //   npm run expose:storefront -- --allow=203.0.113.7/32,198.51.100.0/24
-//   npm run expose:storefront -- --off               # back to ClusterIP; the NLB is deleted
+//   npm run expose:storefront -- --off               # back to ClusterIP; the Classic ELB is deleted
 //
 // Always run `--off` (or scripts/pre-destroy.ts) before `cdk destroy`: a Kubernetes-created load
 // balancer is not tracked by CloudFormation and its network interfaces block VPC deletion.

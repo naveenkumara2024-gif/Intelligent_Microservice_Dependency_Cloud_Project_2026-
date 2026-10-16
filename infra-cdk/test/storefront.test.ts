@@ -57,11 +57,11 @@ const serviceBlock = (yaml: string): string => {
     expect(svc).not.toMatch(/aws-load-balancer/);
   });
 
-  test('the public overlay makes only the storefront Service a LoadBalancer, as an NLB', () => {
+  test('the public overlay makes only the storefront Service a LoadBalancer, as a Classic ELB', () => {
     const rendered = render('online-boutique-public');
     const svc = serviceBlock(rendered);
     expect(svc).toMatch(/type: LoadBalancer/);
-    expect(svc).toMatch(/service\.beta\.kubernetes\.io\/aws-load-balancer-type: nlb/);
+    expect(svc).not.toMatch(/service\.beta\.kubernetes\.io\/aws-load-balancer-type/);
     // the internal `frontend` Service and everything else stay as they were
     const lbCount = (rendered.match(/type: LoadBalancer/g) ?? []).length;
     expect(lbCount).toBe(1);
